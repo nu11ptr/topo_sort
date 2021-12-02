@@ -13,7 +13,7 @@ impl fmt::Display for CycleError {
 
 impl error::Error for CycleError {}
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Depends<T> {
     // Dependent -> Dependencies
     node_depends: HashMap<T, HashSet<T>>,
@@ -57,6 +57,27 @@ where
 
     pub fn to_vec(&self) -> Result<Vec<&T>, CycleError> {
         self.iter().collect()
+    }
+
+    pub fn to_owned_vec(&self) -> Result<Vec<T>, CycleError>
+    where
+        T: Clone,
+    {
+        self.iter()
+            .map(|result| result.map(|node| node.clone()))
+            .collect()
+    }
+}
+
+impl<'d, T> IntoIterator for &'d Depends<T>
+where
+    T: Eq + Hash,
+{
+    type Item = Result<&'d T, CycleError>;
+    type IntoIter = DependsIter<'d, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
@@ -145,12 +166,68 @@ mod tests {
     use crate::Depends;
 
     #[test]
-    fn test_indirect_cycle() {
-        let mut depends = Depends::with_capacity(10);
-        depends.insert(1, vec![2, 3]);
-        depends.insert(2, vec![3]);
-        depends.insert(3, vec![1]);
+    fn test_direct_cycle() {
+        let mut depends = Depends::with_capacity(2);
+        depends.insert(1, vec![2]); // cycle
+        depends.insert(2, vec![1]); // cycle
 
         assert!(depends.to_vec().is_err())
+    }
+
+    #[test]
+    fn test_indirect_cycle() {
+        let mut depends = Depends::with_capacity(3);
+        depends.insert(1, vec![2, 3]);
+        depends.insert(2, vec![3]);
+        depends.insert(3, vec![1]); // cycle
+
+        assert!(depends.to_vec().is_err())
+    }
+
+    #[test]
+    fn test_good() {
+        let mut depends = Depends::with_capacity(5);
+        depends.insert("C", vec!["A", "B"]);
+        depends.insert("E", vec!["B", "C"]);
+        depends.insert("A", vec![]);
+        depends.insert("D", vec!["A", "C", "E"]);
+        depends.insert("B", vec!["A"]);
+
+        assert_eq!(
+            vec!["A", "B", "C", "E", "D"],
+            depends.to_owned_vec().unwrap()
+        )
+    }
+
+    #[test]
+    fn test_good_with_excess_data() {
+        let mut depends = Depends::with_capacity(5);
+        depends.insert("C", vec!["F", "A", "B", "F"]); // There is no 'F' - two of them
+        depends.insert("E", vec!["C", "B", "C"]); // Double "C" dependency
+        depends.insert("A", vec!["A", "G"]); // Self dependency + there is no 'G'
+        depends.insert("D", vec!["A", "C", "E"]);
+        depends.insert("B", vec!["B", "A"]); // Self dependency
+
+        assert_eq!(
+            vec!["A", "B", "C", "E", "D"],
+            depends.to_owned_vec().unwrap()
+        )
+    }
+
+    #[test]
+    fn test_loop() {
+        let mut depends = Depends::with_capacity(5);
+        depends.insert("C", vec!["A", "B"]);
+        depends.insert("E", vec!["B", "C"]);
+        depends.insert("A", vec![]);
+        depends.insert("D", vec!["A", "C", "E"]);
+        depends.insert("B", vec!["A"]);
+
+        let mut actual = Vec::with_capacity(5);
+        for node in &depends {
+            actual.push(*node.unwrap());
+        }
+
+        assert_eq!(vec!["A", "B", "C", "E", "D"], actual)
     }
 }
