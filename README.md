@@ -1,5 +1,8 @@
 # topo_sort
 
+![crates.io](https://img.shields.io/crates/v/topo_sort?style=for-the-badge)
+![docs.rs](https://img.shields.io/docsrs/topo_sort?style=for-the-badge)
+
 A "cycle-safe" topological sort for a set of nodes with dependencies in Rust.
 Basically, it allows sorting a list by its dependencies while checking for
 cycles in the graph. If a cycle is detected, a `CycleError` is returned from the
