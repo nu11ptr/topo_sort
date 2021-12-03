@@ -26,7 +26,7 @@
 //!
 //! assert_eq!(
 //!     vec!["A", "B", "C", "E", "D"],
-//!     topo_sort.to_owned_vec().unwrap()
+//!     topo_sort.try_owned_vec().unwrap()
 //! );
 //! ```
 //!
@@ -46,7 +46,7 @@
 //! for node in &topo_sort {
 //!     // We check for cycle errors before usage
 //!     match node {
-//!         Ok(node) => nodes.push(*node),
+//!         Ok((node, _)) => nodes.push(*node),
 //!         Err(_) => panic!("Unexpected cycle!"),
 //!     }
 //! }
@@ -59,6 +59,8 @@ use std::hash::Hash;
 use std::ops::Index;
 use std::{error, fmt};
 
+// *** Error ***
+
 /// An error type returned by the iterator when a cycle is detected in the dependency graph
 #[derive(fmt::Debug, PartialEq)]
 pub struct CycleError;
@@ -70,6 +72,8 @@ impl fmt::Display for CycleError {
 }
 
 impl error::Error for CycleError {}
+
+// *** TopoSort ***
 
 /// TopoSort is used as a collection to map nodes to their dependencies. The actual sort is "lazy" and is performed during iteration.
 #[derive(Clone, Default)]
@@ -129,22 +133,30 @@ where
 
     /// Start the sort process and return an iterator of the results
     #[inline]
+    pub fn nodes(&self) -> TopoSortNodeIter<'_, T> {
+        TopoSortNodeIter::new(&self.node_depends)
+    }
+
+    /// Start the sort process and return an iterator of the results and a set of its dependents
+    #[inline]
     pub fn iter(&self) -> TopoSortIter<'_, T> {
         TopoSortIter::new(&self.node_depends)
     }
 
-    /// Sort and return a vector (with borrowed nodes) of the results
+    /// Sort and return a vector (with borrowed nodes) of the results. If a cycle is detected,
+    /// an error is returned instead
     #[inline]
-    pub fn to_vec(&self) -> Result<Vec<&T>, CycleError> {
-        self.iter().collect()
+    pub fn try_vec(&self) -> Result<Vec<&T>, CycleError> {
+        self.nodes().collect()
     }
 
-    /// Sort and return a vector (with owned/cloned nodes) of the results
-    pub fn to_owned_vec(&self) -> Result<Vec<T>, CycleError>
+    /// Sort and return a vector (with owned/cloned nodes) of the results. If a cycle is detected,
+    /// an error is returned instead
+    pub fn try_owned_vec(&self) -> Result<Vec<T>, CycleError>
     where
         T: Clone,
     {
-        self.iter()
+        self.nodes()
             .map(|result| result.map(|node| node.clone()))
             .collect()
     }
@@ -184,7 +196,7 @@ impl<'d, T> IntoIterator for &'d TopoSort<T>
 where
     T: Eq + Hash,
 {
-    type Item = Result<&'d T, CycleError>;
+    type Item = Result<(&'d T, &'d HashSet<T>), CycleError>;
     type IntoIter = TopoSortIter<'d, T>;
 
     #[inline]
@@ -193,8 +205,12 @@ where
     }
 }
 
-/// Iterator over the final result of the topological sort
+// *** TopoSortIter ***
+
+/// Iterator over the final node and dependent set of the topological sort
 pub struct TopoSortIter<'d, T> {
+    // Dependent -> Dependencies
+    node_depends: &'d HashMap<T, HashSet<T>>,
     // Dependency -> (Dependents, Edge Count)
     nodes: HashMap<&'d T, (HashSet<&'d T>, u32)>,
     no_edges: Vec<&'d T>,
@@ -233,7 +249,11 @@ where
             .map(|(&node, _)| node)
             .collect();
 
-        TopoSortIter { nodes, no_edges }
+        TopoSortIter {
+            node_depends,
+            nodes,
+            no_edges,
+        }
     }
 }
 
@@ -241,7 +261,7 @@ impl<'d, T> Iterator for TopoSortIter<'d, T>
 where
     T: Eq + Hash,
 {
-    type Item = Result<&'d T, CycleError>;
+    type Item = Result<(&'d T, &'d HashSet<T>), CycleError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.no_edges.pop() {
@@ -261,7 +281,8 @@ where
                     }
                 }
 
-                Some(Ok(node))
+                // Safe?
+                Some(Ok((node, &self.node_depends[node])))
             }
             None if self.nodes.is_empty() => None,
             None => {
@@ -277,6 +298,40 @@ where
     }
 }
 
+// *** TopoSortNodeIter ***
+
+/// Iterator over the final node only of the topological sort
+pub struct TopoSortNodeIter<'d, T>(TopoSortIter<'d, T>);
+
+impl<'d, T> TopoSortNodeIter<'d, T>
+where
+    T: Eq + Hash,
+{
+    #[inline]
+    fn new(node_depends: &'d HashMap<T, HashSet<T>>) -> Self {
+        TopoSortNodeIter(TopoSortIter::new(node_depends))
+    }
+}
+
+impl<'d, T> Iterator for TopoSortNodeIter<'d, T>
+where
+    T: Eq + Hash,
+{
+    type Item = Result<&'d T, CycleError>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|result| result.map(|(node, _)| node))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+// *** Tests ***
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -291,7 +346,7 @@ mod tests {
         topo_sort.insert(3, vec![4]);
         topo_sort.insert(4, vec![]);
 
-        let v: Vec<Result<_, _>> = topo_sort.iter().collect();
+        let v: Vec<Result<_, _>> = topo_sort.nodes().collect();
         assert_eq!(vec![Ok(&4), Ok(&3), Err(CycleError)], v);
     }
 
@@ -301,7 +356,7 @@ mod tests {
         topo_sort.insert(1, vec![2]);
         topo_sort.insert(2, vec![1]); // cycle
 
-        assert!(topo_sort.to_vec().is_err())
+        assert!(topo_sort.try_vec().is_err())
     }
 
     #[test]
@@ -311,7 +366,7 @@ mod tests {
         topo_sort.insert(2, vec![3]);
         topo_sort.insert(3, vec![1]); // cycle
 
-        assert!(topo_sort.to_vec().is_err())
+        assert!(topo_sort.try_vec().is_err())
     }
 
     #[test]
@@ -325,7 +380,7 @@ mod tests {
 
         assert_eq!(
             vec!["A", "B", "C", "E", "D"],
-            topo_sort.to_owned_vec().unwrap()
+            topo_sort.try_owned_vec().unwrap()
         );
     }
 
@@ -340,7 +395,7 @@ mod tests {
 
         assert_eq!(
             vec!["A", "B", "C", "E", "D"],
-            topo_sort.to_owned_vec().unwrap()
+            topo_sort.try_owned_vec().unwrap()
         );
     }
 
@@ -357,7 +412,7 @@ mod tests {
         for node in &topo_sort {
             // Must check for cycle errors before usage
             match node {
-                Ok(node) => nodes.push(*node),
+                Ok((node, _)) => nodes.push(*node),
                 Err(_) => panic!("Unexpected cycle!"),
             }
         }

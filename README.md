@@ -12,7 +12,7 @@ iterator.
 
 ```toml
 [dependencies]
-topo_sort = "0.1"
+topo_sort = "0.2"
 ```
 
 A basic example:
@@ -30,7 +30,7 @@ fn main() {
 
     assert_eq!(
         vec!["A", "B", "C", "E", "D"],
-        topo_sort.to_owned_vec().unwrap()
+        topo_sort.try_owned_vec().unwrap()
     );
 }
 ```
@@ -72,7 +72,7 @@ fn main() {
     topo_sort.insert(2, vec![3]);
     topo_sort.insert(3, vec![1]); // cycle
 
-    assert!(topo_sort.to_vec().is_err());
+    assert!(topo_sort.try_vec().is_err());
 }
 ```
 
