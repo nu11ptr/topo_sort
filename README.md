@@ -15,50 +15,56 @@ topo_sort = "0.1"
 A basic example:
 
 ```rust
-let mut topo_sort = TopoSort::with_capacity(5);
-topo_sort.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
-topo_sort.insert("E", vec!["B", "C"]);
-topo_sort.insert("A", vec![]);
-topo_sort.insert("D", vec!["A", "C", "E"]);
-topo_sort.insert("B", vec!["A"]);
+fn main() {
+    let mut topo_sort = TopoSort::with_capacity(5);
+    topo_sort.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
+    topo_sort.insert("E", vec!["B", "C"]);
+    topo_sort.insert("A", vec![]);
+    topo_sort.insert("D", vec!["A", "C", "E"]);
+    topo_sort.insert("B", vec!["A"]);
 
-assert_eq!(
-    vec!["A", "B", "C", "E", "D"],
-    topo_sort.to_owned_vec().unwrap()
-);
+    assert_eq!(
+        vec!["A", "B", "C", "E", "D"],
+        topo_sort.to_owned_vec().unwrap()
+    );
+}
 ```
 
 ...or using iteration:
 
 ```rust
-let mut topo_sort = TopoSort::with_capacity(5);
-topo_sort.insert("C", vec!["A", "B"]);
-topo_sort.insert("E", vec!["B", "C"]);
-topo_sort.insert("A", vec![]);
-topo_sort.insert("D", vec!["A", "C", "E"]);
-topo_sort.insert("B", vec!["A"]);
+fn main() {
+    let mut topo_sort = TopoSort::with_capacity(5);
+    topo_sort.insert("C", vec!["A", "B"]);
+    topo_sort.insert("E", vec!["B", "C"]);
+    topo_sort.insert("A", vec![]);
+    topo_sort.insert("D", vec!["A", "C", "E"]);
+    topo_sort.insert("B", vec!["A"]);
 
-let mut nodes = Vec::with_capacity(5);
-for node in & topo_sort {
-// Must check for cycle errors before usage
-match node {
-Ok(node) => nodes.push( * node),
-Err(CycleError) => panic!("Unexpected cycle!"),
-}
-}
+    let mut nodes = Vec::with_capacity(5);
+    for node in &topo_sort {
+        // Must check for cycle errors before usage
+        match node {
+            Ok(node) => nodes.push(*node),
+            Err(CycleError) => panic!("Unexpected cycle!"),
+        }
+    }
 
-assert_eq!(vec!["A", "B", "C", "E", "D"], nodes)
+    assert_eq!(vec!["A", "B", "C", "E", "D"], nodes);
+}
 ```
 
 Cycle detected:
 
 ```rust
-let mut topo_sort = TopoSort::with_capacity(3);
-topo_sort.insert(1, vec![2, 3]);
-topo_sort.insert(2, vec![3]);
-topo_sort.insert(3, vec![1]); // cycle
+fn main() {
+    let mut topo_sort = TopoSort::with_capacity(3);
+    topo_sort.insert(1, vec![2, 3]);
+    topo_sort.insert(2, vec![3]);
+    topo_sort.insert(3, vec![1]); // cycle
 
-assert!(topo_sort.to_vec().is_err());
+    assert!(topo_sort.to_vec().is_err());
+}
 ```
 
 ## Algorithm

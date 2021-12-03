@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! A "cycle-safe" topological sort for a set of nodes with dependencies in Rust.
 //! Basically, it allows sorting a list by its dependencies while checking for
 //! cycles in the graph. If a cycle is detected, a `CycleError` is returned from the
@@ -45,7 +47,7 @@
 //!     }
 //! }
 //!
-//! assert_eq!(vec!["A", "B", "C", "E", "D"], nodes)
+//! assert_eq!(vec!["A", "B", "C", "E", "D"], nodes);
 //! ```
 
 use std::collections::{HashMap, HashSet};
@@ -257,7 +259,7 @@ mod tests {
         assert_eq!(
             vec!["A", "B", "C", "E", "D"],
             topo_sort.to_owned_vec().unwrap()
-        )
+        );
     }
 
     #[test]
@@ -272,7 +274,7 @@ mod tests {
         assert_eq!(
             vec!["A", "B", "C", "E", "D"],
             topo_sort.to_owned_vec().unwrap()
-        )
+        );
     }
 
     #[test]
@@ -293,6 +295,6 @@ mod tests {
             }
         }
 
-        assert_eq!(vec!["A", "B", "C", "E", "D"], nodes)
+        assert_eq!(vec!["A", "B", "C", "E", "D"], nodes);
     }
 }
