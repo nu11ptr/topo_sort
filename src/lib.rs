@@ -15,6 +15,8 @@
 //! A basic example:
 //!
 //! ```rust
+//! use topo_sort::TopoSort;
+//!
 //! let mut topo_sort = TopoSort::with_capacity(5);
 //! topo_sort.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
 //! topo_sort.insert("E", vec!["B", "C"]);
@@ -31,6 +33,8 @@
 //! ...or using iteration:
 //!
 //! ```rust
+//! use topo_sort::TopoSort;
+//!
 //! let mut topo_sort = TopoSort::with_capacity(5);
 //! topo_sort.insert("C", vec!["A", "B"]);
 //! topo_sort.insert("E", vec!["B", "C"]);
@@ -43,7 +47,7 @@
 //!     // We check for cycle errors before usage
 //!     match node {
 //!         Ok(node) => nodes.push(*node),
-//!         Err(CycleError) => panic!("Unexpected cycle!"),
+//!         Err(_) => panic!("Unexpected cycle!"),
 //!     }
 //! }
 //!
@@ -52,6 +56,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::ops::Index;
 use std::{error, fmt};
 
 /// An error type returned by the iterator when a cycle is detected in the dependency graph
@@ -77,7 +82,16 @@ impl<T> TopoSort<T>
 where
     T: Eq + Hash,
 {
+    /// Initialize a new struct with zero capacity. It will not allocate until the first insertion
+    #[inline]
+    pub fn new() -> Self {
+        TopoSort {
+            node_depends: HashMap::new(),
+        }
+    }
+
     /// Initialize a new struct from a map. The key represents the node to be sorted and the set is its dependencies
+    #[inline]
     pub fn from_map(nodes: HashMap<T, HashSet<T>>) -> Self {
         TopoSort {
             node_depends: nodes,
@@ -85,6 +99,7 @@ where
     }
 
     /// Initialize an empty struct with a given capacity
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         TopoSort {
             node_depends: HashMap::with_capacity(capacity),
@@ -101,21 +116,25 @@ where
     }
 
     /// Insert into this struct with the given node and a set of its dependencies
+    #[inline]
     pub fn insert_from_set(&mut self, node: T, depends: HashSet<T>) {
         self.node_depends.insert(node, depends);
     }
 
     /// Insert into this struct with the given node and an iterator of its dependencies
+    #[inline]
     pub fn insert<I: IntoIterator<Item = T>>(&mut self, node: T, i: I) {
         self.node_depends.insert(node, i.into_iter().collect());
     }
 
     /// Start the sort process and return an iterator of the results
+    #[inline]
     pub fn iter(&self) -> TopoSortIter<'_, T> {
         TopoSortIter::new(&self.node_depends)
     }
 
     /// Sort and return a vector (with borrowed nodes) of the results
+    #[inline]
     pub fn to_vec(&self) -> Result<Vec<&T>, CycleError> {
         self.iter().collect()
     }
@@ -129,6 +148,36 @@ where
             .map(|result| result.map(|node| node.clone()))
             .collect()
     }
+
+    /// Returns true if there aren't any nodes added otherwise false
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.node_depends.is_empty()
+    }
+
+    /// Returns the number of nodes added to the collection
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.node_depends.len()
+    }
+
+    /// Returns the dependency set of a node (as inserted), if found, else None
+    #[inline]
+    pub fn get(&self, node: &T) -> Option<&HashSet<T>> {
+        self.node_depends.get(node)
+    }
+}
+
+impl<T> Index<&T> for TopoSort<T>
+where
+    T: Eq + Hash,
+{
+    type Output = HashSet<T>;
+
+    #[inline]
+    fn index(&self, index: &T) -> &Self::Output {
+        self.node_depends.index(index)
+    }
 }
 
 impl<'d, T> IntoIterator for &'d TopoSort<T>
@@ -138,6 +187,7 @@ where
     type Item = Result<&'d T, CycleError>;
     type IntoIter = TopoSortIter<'d, T>;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
@@ -226,6 +276,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use crate::TopoSort;
 
     #[test]
@@ -291,10 +343,27 @@ mod tests {
             // Must check for cycle errors before usage
             match node {
                 Ok(node) => nodes.push(*node),
-                Err(CycleError) => panic!("Unexpected cycle!"),
+                Err(_) => panic!("Unexpected cycle!"),
             }
         }
 
         assert_eq!(vec!["A", "B", "C", "E", "D"], nodes);
+    }
+
+    #[test]
+    fn test_misc() {
+        let mut topo_sort = TopoSort::new();
+        assert!(topo_sort.is_empty());
+
+        topo_sort.insert_from_slice("A", &["B"]);
+        assert_eq!(1, topo_sort.len());
+
+        let set = HashSet::from_iter(vec!["B", "D"]);
+        topo_sort.insert_from_set("C", set.clone());
+
+        assert_eq!(set, *topo_sort.get(&"C").unwrap());
+        assert_eq!(set, topo_sort[&"C"]);
+
+        assert_eq!(None, topo_sort.get(&"D"));
     }
 }

@@ -18,6 +18,8 @@ topo_sort = "0.1"
 A basic example:
 
 ```rust
+use topo_sort::TopoSort;
+
 fn main() {
     let mut topo_sort = TopoSort::with_capacity(5);
     topo_sort.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
@@ -36,6 +38,8 @@ fn main() {
 ...or using iteration:
 
 ```rust
+use topo_sort::TopoSort;
+
 fn main() {
     let mut topo_sort = TopoSort::with_capacity(5);
     topo_sort.insert("C", vec!["A", "B"]);
@@ -46,10 +50,10 @@ fn main() {
 
     let mut nodes = Vec::with_capacity(5);
     for node in &topo_sort {
-        // Must check for cycle errors before usage
+        // We check for cycle errors before usage
         match node {
             Ok(node) => nodes.push(*node),
-            Err(CycleError) => panic!("Unexpected cycle!"),
+            Err(_) => panic!("Unexpected cycle!"),
         }
     }
 
@@ -60,6 +64,8 @@ fn main() {
 Cycle detected:
 
 ```rust
+use topo_sort::TopoSort;
+
 fn main() {
     let mut topo_sort = TopoSort::with_capacity(3);
     topo_sort.insert(1, vec![2, 3]);
