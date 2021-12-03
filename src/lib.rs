@@ -1,7 +1,58 @@
+//! A "cycle-safe" topological sort for a set of nodes with dependencies in Rust.
+//! Basically, it allows sorting a list by its dependencies while checking for
+//! cycles in the graph. If a cycle is detected, a `CycleError` is returned from the
+//! iterator.
+//!
+//! ## Usage
+//!
+//! ```toml
+//! [dependencies]
+//! depends = "0.1"
+//! ```
+//!
+//! A basic example:
+//!
+//! ```rust
+//! let mut depends = Depends::with_capacity(5);
+//! depends.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
+//! depends.insert("E", vec!["B", "C"]);
+//! depends.insert("A", vec![]);
+//! depends.insert("D", vec!["A", "C", "E"]);
+//! depends.insert("B", vec!["A"]);
+//!
+//! assert_eq!(
+//!     vec!["A", "B", "C", "E", "D"],
+//!     depends.to_owned_vec().unwrap()
+//! );
+//! ```
+//!
+//! ...or using iteration:
+//!
+//! ```rust
+//! let mut depends = Depends::with_capacity(5);
+//! depends.insert("C", vec!["A", "B"]);
+//! depends.insert("E", vec!["B", "C"]);
+//! depends.insert("A", vec![]);
+//! depends.insert("D", vec!["A", "C", "E"]);
+//! depends.insert("B", vec!["A"]);
+//!
+//! let mut nodes = Vec::with_capacity(5);
+//! for node in &depends {
+//!     // Must check for cycle errors before usage
+//!     match node {
+//!         Ok(node) => nodes.push(*node),
+//!         Err(CycleError) => panic!("Unexpected cycle!"),
+//!     }
+//! }
+//!
+//! assert_eq!(vec!["A", "B", "C", "E", "D"], nodes)
+//! ```
+
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::{error, fmt};
 
+/// An error type returned by the iterator when a cycle is detected in the dependency graph
 #[derive(fmt::Debug)]
 pub struct CycleError;
 
@@ -13,6 +64,7 @@ impl fmt::Display for CycleError {
 
 impl error::Error for CycleError {}
 
+/// Depends is used as a collection to map nodes to their dependencies. The actual sort is "lazy" and is performed during iteration.
 #[derive(Clone, Default)]
 pub struct Depends<T> {
     // Dependent -> Dependencies
@@ -23,18 +75,21 @@ impl<T> Depends<T>
 where
     T: Eq + Hash,
 {
+    /// Initialize a new struct from a map. The key represents the node to be sorted and the set is its dependencies
     pub fn from_map(nodes: HashMap<T, HashSet<T>>) -> Self {
         Depends {
             node_depends: nodes,
         }
     }
 
+    /// Initialize an empty struct with a given capacity
     pub fn with_capacity(capacity: usize) -> Self {
         Depends {
             node_depends: HashMap::with_capacity(capacity),
         }
     }
 
+    /// Insert into this struct with the given node and a slice of its dependencies
     pub fn insert_from_slice(&mut self, node: T, slice: &[T])
     where
         T: Clone,
@@ -43,22 +98,27 @@ where
             .insert(node, HashSet::from_iter(slice.to_vec()));
     }
 
+    /// Insert into this struct with the given node and a set of its dependencies
     pub fn insert_from_set(&mut self, node: T, depends: HashSet<T>) {
         self.node_depends.insert(node, depends);
     }
 
+    /// Insert into this struct with the given node and an iterator of its dependencies
     pub fn insert<I: IntoIterator<Item = T>>(&mut self, node: T, i: I) {
         self.node_depends.insert(node, i.into_iter().collect());
     }
 
+    /// Start the sort process and return an iterator of the results
     pub fn iter(&self) -> DependsIter<'_, T> {
         DependsIter::new(&self.node_depends)
     }
 
+    /// Sort and return a vector (with borrowed nodes) of the results
     pub fn to_vec(&self) -> Result<Vec<&T>, CycleError> {
         self.iter().collect()
     }
 
+    /// Sort and return a vector (with owned/cloned nodes) of the results
     pub fn to_owned_vec(&self) -> Result<Vec<T>, CycleError>
     where
         T: Clone,
@@ -81,6 +141,7 @@ where
     }
 }
 
+/// Iterator over the final result of the topological sort
 pub struct DependsIter<'d, T> {
     // Dependency -> (Dependents, Edge Count)
     nodes: HashMap<&'d T, (HashSet<&'d T>, u32)>,
@@ -223,11 +284,15 @@ mod tests {
         depends.insert("D", vec!["A", "C", "E"]);
         depends.insert("B", vec!["A"]);
 
-        let mut actual = Vec::with_capacity(5);
+        let mut nodes = Vec::with_capacity(5);
         for node in &depends {
-            actual.push(*node.unwrap());
+            // Must check for cycle errors before usage
+            match node {
+                Ok(node) => nodes.push(*node),
+                Err(CycleError) => panic!("Unexpected cycle!"),
+            }
         }
 
-        assert_eq!(vec!["A", "B", "C", "E", "D"], actual)
+        assert_eq!(vec!["A", "B", "C", "E", "D"], nodes)
     }
 }

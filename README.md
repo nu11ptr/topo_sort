@@ -28,6 +28,28 @@ assert_eq!(
 );
 ```
 
+...or using iteration:
+
+```rust
+let mut depends = Depends::with_capacity(5);
+depends.insert("C", vec!["A", "B"]);
+depends.insert("E", vec!["B", "C"]);
+depends.insert("A", vec![]);
+depends.insert("D", vec!["A", "C", "E"]);
+depends.insert("B", vec!["A"]);
+
+let mut nodes = Vec::with_capacity(5);
+for node in &depends {
+    // Must check for cycle errors before usage
+    match node {
+        Ok(node) => nodes.push(*node),
+        Err(CycleError) => panic!("Unexpected cycle!"),
+    }
+}
+
+assert_eq!(vec!["A", "B", "C", "E", "D"], nodes)
+```
+
 Cycle detected:
 
 ```rust
@@ -36,7 +58,7 @@ depends.insert(1, vec![2, 3]);
 depends.insert(2, vec![3]);
 depends.insert(3, vec![1]); // cycle
 
-assert!(depends.to_vec().is_err())
+assert!(depends.to_vec().is_err());
 ```
 
 ## Algorithm
@@ -49,7 +71,14 @@ optimized in any way.
 
 ## Maintenance
 
-The author will make basic changes to keep the crate updated to ensure it stays
-compatible with future stable Rust, etc. but no further functionality
-enhancements are likely. The crate meets the needs of the author and is unlikely
-to get significant new features.
+The crate currently meets the needs of the author and probably will not see
+significant new features. It will, however, continue to be updated if required
+for future compatibility/etc.
+
+## License
+
+This project is licensed optionally under either:
+
+* Apache License, Version 2.0, (LICENSE-APACHE
+  or https://www.apache.org/licenses/LICENSE-2.0)
+* MIT license (LICENSE-MIT or https://opensource.org/licenses/MIT)
