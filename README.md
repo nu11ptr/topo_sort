@@ -1,4 +1,4 @@
-# depends
+# topo_sort
 
 A "cycle-safe" topological sort for a set of nodes with dependencies in Rust.
 Basically, it allows sorting a list by its dependencies while checking for
@@ -9,42 +9,42 @@ iterator.
 
 ```toml
 [dependencies]
-depends = "0.1"
+topo_sort = "0.1"
 ```
 
 A basic example:
 
 ```rust
-let mut depends = Depends::with_capacity(5);
-depends.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
-depends.insert("E", vec!["B", "C"]);
-depends.insert("A", vec![]);
-depends.insert("D", vec!["A", "C", "E"]);
-depends.insert("B", vec!["A"]);
+let mut topo_sort = TopoSort::with_capacity(5);
+topo_sort.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
+topo_sort.insert("E", vec!["B", "C"]);
+topo_sort.insert("A", vec![]);
+topo_sort.insert("D", vec!["A", "C", "E"]);
+topo_sort.insert("B", vec!["A"]);
 
 assert_eq!(
     vec!["A", "B", "C", "E", "D"],
-    depends.to_owned_vec().unwrap()
+    topo_sort.to_owned_vec().unwrap()
 );
 ```
 
 ...or using iteration:
 
 ```rust
-let mut depends = Depends::with_capacity(5);
-depends.insert("C", vec!["A", "B"]);
-depends.insert("E", vec!["B", "C"]);
-depends.insert("A", vec![]);
-depends.insert("D", vec!["A", "C", "E"]);
-depends.insert("B", vec!["A"]);
+let mut topo_sort = TopoSort::with_capacity(5);
+topo_sort.insert("C", vec!["A", "B"]);
+topo_sort.insert("E", vec!["B", "C"]);
+topo_sort.insert("A", vec![]);
+topo_sort.insert("D", vec!["A", "C", "E"]);
+topo_sort.insert("B", vec!["A"]);
 
 let mut nodes = Vec::with_capacity(5);
-for node in &depends {
-    // Must check for cycle errors before usage
-    match node {
-        Ok(node) => nodes.push(*node),
-        Err(CycleError) => panic!("Unexpected cycle!"),
-    }
+for node in & topo_sort {
+// Must check for cycle errors before usage
+match node {
+Ok(node) => nodes.push( * node),
+Err(CycleError) => panic!("Unexpected cycle!"),
+}
 }
 
 assert_eq!(vec!["A", "B", "C", "E", "D"], nodes)
@@ -53,12 +53,12 @@ assert_eq!(vec!["A", "B", "C", "E", "D"], nodes)
 Cycle detected:
 
 ```rust
-let mut depends = Depends::with_capacity(3);
-depends.insert(1, vec![2, 3]);
-depends.insert(2, vec![3]);
-depends.insert(3, vec![1]); // cycle
+let mut topo_sort = TopoSort::with_capacity(3);
+topo_sort.insert(1, vec![2, 3]);
+topo_sort.insert(2, vec![3]);
+topo_sort.insert(3, vec![1]); // cycle
 
-assert!(depends.to_vec().is_err());
+assert!(topo_sort.to_vec().is_err());
 ```
 
 ## Algorithm

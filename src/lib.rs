@@ -7,38 +7,38 @@
 //!
 //! ```toml
 //! [dependencies]
-//! depends = "0.1"
+//! topo_sort = "0.1"
 //! ```
 //!
 //! A basic example:
 //!
 //! ```rust
-//! let mut depends = Depends::with_capacity(5);
-//! depends.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
-//! depends.insert("E", vec!["B", "C"]);
-//! depends.insert("A", vec![]);
-//! depends.insert("D", vec!["A", "C", "E"]);
-//! depends.insert("B", vec!["A"]);
+//! let mut topo_sort = TopoSort::with_capacity(5);
+//! topo_sort.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
+//! topo_sort.insert("E", vec!["B", "C"]);
+//! topo_sort.insert("A", vec![]);
+//! topo_sort.insert("D", vec!["A", "C", "E"]);
+//! topo_sort.insert("B", vec!["A"]);
 //!
 //! assert_eq!(
 //!     vec!["A", "B", "C", "E", "D"],
-//!     depends.to_owned_vec().unwrap()
+//!     topo_sort.to_owned_vec().unwrap()
 //! );
 //! ```
 //!
 //! ...or using iteration:
 //!
 //! ```rust
-//! let mut depends = Depends::with_capacity(5);
-//! depends.insert("C", vec!["A", "B"]);
-//! depends.insert("E", vec!["B", "C"]);
-//! depends.insert("A", vec![]);
-//! depends.insert("D", vec!["A", "C", "E"]);
-//! depends.insert("B", vec!["A"]);
+//! let mut topo_sort = TopoSort::with_capacity(5);
+//! topo_sort.insert("C", vec!["A", "B"]);
+//! topo_sort.insert("E", vec!["B", "C"]);
+//! topo_sort.insert("A", vec![]);
+//! topo_sort.insert("D", vec!["A", "C", "E"]);
+//! topo_sort.insert("B", vec!["A"]);
 //!
 //! let mut nodes = Vec::with_capacity(5);
-//! for node in &depends {
-//!     // Must check for cycle errors before usage
+//! for node in &topo_sort {
+//!     // We check for cycle errors before usage
 //!     match node {
 //!         Ok(node) => nodes.push(*node),
 //!         Err(CycleError) => panic!("Unexpected cycle!"),
@@ -64,27 +64,27 @@ impl fmt::Display for CycleError {
 
 impl error::Error for CycleError {}
 
-/// Depends is used as a collection to map nodes to their dependencies. The actual sort is "lazy" and is performed during iteration.
+/// TopoSort is used as a collection to map nodes to their dependencies. The actual sort is "lazy" and is performed during iteration.
 #[derive(Clone, Default)]
-pub struct Depends<T> {
+pub struct TopoSort<T> {
     // Dependent -> Dependencies
     node_depends: HashMap<T, HashSet<T>>,
 }
 
-impl<T> Depends<T>
+impl<T> TopoSort<T>
 where
     T: Eq + Hash,
 {
     /// Initialize a new struct from a map. The key represents the node to be sorted and the set is its dependencies
     pub fn from_map(nodes: HashMap<T, HashSet<T>>) -> Self {
-        Depends {
+        TopoSort {
             node_depends: nodes,
         }
     }
 
     /// Initialize an empty struct with a given capacity
     pub fn with_capacity(capacity: usize) -> Self {
-        Depends {
+        TopoSort {
             node_depends: HashMap::with_capacity(capacity),
         }
     }
@@ -109,8 +109,8 @@ where
     }
 
     /// Start the sort process and return an iterator of the results
-    pub fn iter(&self) -> DependsIter<'_, T> {
-        DependsIter::new(&self.node_depends)
+    pub fn iter(&self) -> TopoSortIter<'_, T> {
+        TopoSortIter::new(&self.node_depends)
     }
 
     /// Sort and return a vector (with borrowed nodes) of the results
@@ -129,12 +129,12 @@ where
     }
 }
 
-impl<'d, T> IntoIterator for &'d Depends<T>
+impl<'d, T> IntoIterator for &'d TopoSort<T>
 where
     T: Eq + Hash,
 {
     type Item = Result<&'d T, CycleError>;
-    type IntoIter = DependsIter<'d, T>;
+    type IntoIter = TopoSortIter<'d, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -142,13 +142,13 @@ where
 }
 
 /// Iterator over the final result of the topological sort
-pub struct DependsIter<'d, T> {
+pub struct TopoSortIter<'d, T> {
     // Dependency -> (Dependents, Edge Count)
     nodes: HashMap<&'d T, (HashSet<&'d T>, u32)>,
     no_edges: Vec<&'d T>,
 }
 
-impl<'d, T> DependsIter<'d, T>
+impl<'d, T> TopoSortIter<'d, T>
 where
     T: Eq + Hash,
 {
@@ -181,11 +181,11 @@ where
             .map(|(&node, _)| node)
             .collect();
 
-        DependsIter { nodes, no_edges }
+        TopoSortIter { nodes, no_edges }
     }
 }
 
-impl<'d, T> Iterator for DependsIter<'d, T>
+impl<'d, T> Iterator for TopoSortIter<'d, T>
 where
     T: Eq + Hash,
 {
@@ -224,68 +224,68 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::Depends;
+    use crate::TopoSort;
 
     #[test]
     fn test_direct_cycle() {
-        let mut depends = Depends::with_capacity(2);
-        depends.insert(1, vec![2]); // cycle
-        depends.insert(2, vec![1]); // cycle
+        let mut topo_sort = TopoSort::with_capacity(2);
+        topo_sort.insert(1, vec![2]);
+        topo_sort.insert(2, vec![1]); // cycle
 
-        assert!(depends.to_vec().is_err())
+        assert!(topo_sort.to_vec().is_err())
     }
 
     #[test]
     fn test_indirect_cycle() {
-        let mut depends = Depends::with_capacity(3);
-        depends.insert(1, vec![2, 3]);
-        depends.insert(2, vec![3]);
-        depends.insert(3, vec![1]); // cycle
+        let mut topo_sort = TopoSort::with_capacity(3);
+        topo_sort.insert(1, vec![2, 3]);
+        topo_sort.insert(2, vec![3]);
+        topo_sort.insert(3, vec![1]); // cycle
 
-        assert!(depends.to_vec().is_err())
+        assert!(topo_sort.to_vec().is_err())
     }
 
     #[test]
     fn test_good() {
-        let mut depends = Depends::with_capacity(5);
-        depends.insert("C", vec!["A", "B"]);
-        depends.insert("E", vec!["B", "C"]);
-        depends.insert("A", vec![]);
-        depends.insert("D", vec!["A", "C", "E"]);
-        depends.insert("B", vec!["A"]);
+        let mut topo_sort = TopoSort::with_capacity(5);
+        topo_sort.insert("C", vec!["A", "B"]);
+        topo_sort.insert("E", vec!["B", "C"]);
+        topo_sort.insert("A", vec![]);
+        topo_sort.insert("D", vec!["A", "C", "E"]);
+        topo_sort.insert("B", vec!["A"]);
 
         assert_eq!(
             vec!["A", "B", "C", "E", "D"],
-            depends.to_owned_vec().unwrap()
+            topo_sort.to_owned_vec().unwrap()
         )
     }
 
     #[test]
     fn test_good_with_excess_data() {
-        let mut depends = Depends::with_capacity(5);
-        depends.insert("C", vec!["F", "A", "B", "F"]); // There is no 'F' - two of them
-        depends.insert("E", vec!["C", "B", "C"]); // Double "C" dependency
-        depends.insert("A", vec!["A", "G"]); // Self dependency + there is no 'G'
-        depends.insert("D", vec!["A", "C", "E"]);
-        depends.insert("B", vec!["B", "A"]); // Self dependency
+        let mut topo_sort = TopoSort::with_capacity(5);
+        topo_sort.insert("C", vec!["F", "A", "B", "F"]); // There is no 'F' - two of them
+        topo_sort.insert("E", vec!["C", "B", "C"]); // Double "C" dependency
+        topo_sort.insert("A", vec!["A", "G"]); // Self dependency + there is no 'G'
+        topo_sort.insert("D", vec!["A", "C", "E"]);
+        topo_sort.insert("B", vec!["B", "A"]); // Self dependency
 
         assert_eq!(
             vec!["A", "B", "C", "E", "D"],
-            depends.to_owned_vec().unwrap()
+            topo_sort.to_owned_vec().unwrap()
         )
     }
 
     #[test]
     fn test_loop() {
-        let mut depends = Depends::with_capacity(5);
-        depends.insert("C", vec!["A", "B"]);
-        depends.insert("E", vec!["B", "C"]);
-        depends.insert("A", vec![]);
-        depends.insert("D", vec!["A", "C", "E"]);
-        depends.insert("B", vec!["A"]);
+        let mut topo_sort = TopoSort::with_capacity(5);
+        topo_sort.insert("C", vec!["A", "B"]);
+        topo_sort.insert("E", vec!["B", "C"]);
+        topo_sort.insert("A", vec![]);
+        topo_sort.insert("D", vec!["A", "C", "E"]);
+        topo_sort.insert("B", vec!["A"]);
 
         let mut nodes = Vec::with_capacity(5);
-        for node in &depends {
+        for node in &topo_sort {
             // Must check for cycle errors before usage
             match node {
                 Ok(node) => nodes.push(*node),

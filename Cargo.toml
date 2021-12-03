@@ -1,11 +1,11 @@
 [package]
-name = "depends"
+name = "topo_sort"
 version = "0.1.0"
 authors = ["Scott Meeuwsen <smeeuwsen@gmail.com>"]
 license = "MIT OR Apache-2.0"
 description = "A 'cycle-safe' topological sort for a set of nodes with dependencies"
-repository = "https://github.com/nu11ptr/depends"
-documentation = "https://docs.rs/depends"
+repository = "https://github.com/nu11ptr/topo_sort"
+documentation = "https://docs.rs/topo_sort"
 keywords = ["topological", "sort", "sorting", "dependencies", "dependency"]
 categories = ["algorithms", "data-structures"]
 readme = "README.md"
