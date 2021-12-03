@@ -221,18 +221,21 @@ where
     T: Eq + Hash,
 {
     fn new(node_depends: &'d HashMap<T, HashSet<T>>) -> Self {
-        let len = node_depends.len(); // Avoids borrow issues in closure
-        let mut nodes = HashMap::with_capacity(len);
-
+        // Avoids borrow issues in closure
+        let len = node_depends.len();
         // Assume every dependency has every node as a dependent - likely wasteful, but avoids excess allocations
+        let mut nodes = HashMap::with_capacity(len);
         let new_entry_fn = || (HashSet::with_capacity(len), 0);
 
         for (dependent, dependencies) in node_depends {
+            // Don't overwrite if we have it already (from a dependency), but otherwise ensure every node is added
+            nodes.entry(dependent).or_insert_with(new_entry_fn);
+
             for dependency in dependencies {
-                // Filter nodes that are only dependencies or self dependencies - add others as edges
+                // Filter processing of nodes that are only dependencies or self dependencies - add others as edges
                 if dependent != dependency && node_depends.contains_key(dependency) {
-                    // Each dependent tracks the # of dependencies
-                    let dependent_entry = nodes.entry(dependent).or_insert_with(new_entry_fn);
+                    // Each dependent tracks the # of dependencies (Safe: we just inserted if it was missing above)
+                    let dependent_entry = nodes.get_mut(dependent).unwrap();
                     dependent_entry.1 += 1;
 
                     // Each dependency tracks all it's dependents
@@ -385,7 +388,15 @@ mod tests {
     }
 
     #[test]
-    fn test_good_with_excess_data() {
+    fn test_good_with_no_depends() {
+        let mut topo_sort = TopoSort::with_capacity(1);
+        topo_sort.insert("C", vec![]);
+
+        assert_eq!(vec!["C"], topo_sort.try_owned_vec().unwrap());
+    }
+
+    #[test]
+    fn test_good_with_excess_depends() {
         let mut topo_sort = TopoSort::with_capacity(5);
         topo_sort.insert("C", vec!["F", "A", "B", "F"]); // There is no 'F' - two of them
         topo_sort.insert("E", vec!["C", "B", "C"]); // Double "C" dependency
