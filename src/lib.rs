@@ -60,7 +60,7 @@ use std::ops::Index;
 use std::{error, fmt};
 
 /// An error type returned by the iterator when a cycle is detected in the dependency graph
-#[derive(fmt::Debug)]
+#[derive(fmt::Debug, PartialEq)]
 pub struct CycleError;
 
 impl fmt::Display for CycleError {
@@ -264,7 +264,10 @@ where
                 Some(Ok(node))
             }
             None if self.nodes.is_empty() => None,
-            None => Some(Err(CycleError)),
+            None => {
+                self.nodes.clear();
+                Some(Err(CycleError))
+            }
         }
     }
 
@@ -278,7 +281,19 @@ where
 mod tests {
     use std::collections::HashSet;
 
-    use crate::TopoSort;
+    use crate::{CycleError, TopoSort};
+
+    #[test]
+    fn test_termination() {
+        let mut topo_sort = TopoSort::with_capacity(4);
+        topo_sort.insert(1, vec![2]);
+        topo_sort.insert(2, vec![1]); // cycle
+        topo_sort.insert(3, vec![4]);
+        topo_sort.insert(4, vec![]);
+
+        let v: Vec<Result<_, _>> = topo_sort.iter().collect();
+        assert_eq!(vec![Ok(&4), Ok(&3), Err(CycleError)], v);
+    }
 
     #[test]
     fn test_direct_cycle() {
