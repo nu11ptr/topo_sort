@@ -62,7 +62,7 @@ use std::{error, fmt};
 // *** Error ***
 
 /// An error type returned by the iterator when a cycle is detected in the dependency graph
-#[derive(fmt::Debug, PartialEq)]
+#[derive(Clone, Copy, fmt::Debug, PartialEq)]
 pub struct CycleError;
 
 impl fmt::Display for CycleError {
@@ -192,6 +192,19 @@ where
     }
 }
 
+impl<T> IntoIterator for TopoSort<T>
+where
+    T: Eq + Hash,
+{
+    type Item = Result<(T, HashSet<T>), CycleError>;
+    type IntoIter = IntoTopoSortIter<T>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        IntoTopoSortIter::new(self.node_depends)
+    }
+}
+
 impl<'d, T> IntoIterator for &'d TopoSort<T>
 where
     T: Eq + Hash,
@@ -202,6 +215,129 @@ where
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+// *** IntoTopoSortIter ***
+
+type Nodes<T> = HashMap<*const T, (HashSet<*const T>, u32)>;
+
+/// Consuming iterator over the final node and dependent set of the topological sort
+pub struct IntoTopoSortIter<T> {
+    // Dependent -> Dependencies
+    node_depends: HashMap<T, HashSet<T>>,
+    // Dependency -> (Dependents, Edge Count)
+    nodes: Nodes<T>,
+    no_edges: Vec<*const T>,
+}
+
+impl<T> IntoTopoSortIter<T>
+where
+    T: Eq + Hash,
+{
+    fn make_nodes(node_depends: &HashMap<T, HashSet<T>>) -> Nodes<T> {
+        // Avoids borrow issues in closure
+        let len = node_depends.len();
+        // Assume every dependency has every node as a dependent - likely wasteful, but avoids excess allocations
+        let mut nodes: Nodes<T> = HashMap::with_capacity(len);
+        let new_entry_fn = || (HashSet::with_capacity(len), 0);
+
+        // We need to ensure that every `*const T` is based off `&T` from the key in `node_depends`
+        // NOTE: This looks odd but remember that `Eq` and `Hash` are off the value of `T`, not it's address
+        // so we need to lookup the address even though it looks like an identity op... it isn't
+        let lookup: HashMap<_, _> = node_depends.keys().map(|key| (key, key)).collect();
+
+        for (dependent, dependencies) in node_depends {
+            // Don't overwrite if we have it already (from a dependency below), but otherwise ensure every node is added
+            nodes.entry(dependent).or_insert_with(new_entry_fn);
+
+            for dependency in dependencies {
+                // Filter any self references
+                if dependent != dependency {
+                    // We need to swap to the `&T` based on `dependent` before going further
+                    // `dependency` must be in `node_depends` to qualify for continued processing
+                    if let Some(&dependency) = lookup.get(dependency) {
+                        // Each dependent tracks the # of dependencies
+                        // NOTE: The `or_insert_with` will never be executed, but I just liked it better than casting to `*const T` with `get_mut`
+                        let dependent_entry = nodes.entry(dependent).or_insert_with(new_entry_fn);
+                        dependent_entry.1 += 1;
+
+                        // Each dependency tracks all it's dependents
+                        let dependency_entry = nodes.entry(dependency).or_insert_with(new_entry_fn);
+                        dependency_entry.0.insert(dependent);
+                    }
+                }
+            }
+        }
+
+        nodes
+    }
+
+    fn make_no_edges(nodes_depends: &HashMap<T, HashSet<T>>, nodes: &Nodes<T>) -> Vec<*const T> {
+        // Assume no_edge might hold every single node - wasteful, but avoids excess allocations
+        let mut no_edges = Vec::with_capacity(nodes_depends.len());
+
+        // Do initial seed of sorted with any nodes that currently have zero edges
+        for (&node, (_, edges)) in nodes {
+            if *edges == 0 {
+                no_edges.push(node);
+            }
+        }
+
+        no_edges
+    }
+
+    fn new(node_depends: HashMap<T, HashSet<T>>) -> Self {
+        let nodes = Self::make_nodes(&node_depends);
+        let no_edges = Self::make_no_edges(&node_depends, &nodes);
+
+        IntoTopoSortIter {
+            node_depends,
+            nodes,
+            no_edges,
+        }
+    }
+}
+
+impl<T> Iterator for IntoTopoSortIter<T>
+where
+    T: Eq + Hash,
+{
+    type Item = Result<(T, HashSet<T>), CycleError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.no_edges.pop() {
+            Some(node) => {
+                // NOTE: Unwrap() should be safe - we know it was in there since it came from there
+                // We are done with this node - remove entirely
+                let (dependents, _) = &self.nodes.remove(&node).unwrap();
+
+                // Decrement the edge count of all nodes that depend on this one and add them
+                // to no_edges when they hit zero
+                for &dependent in dependents {
+                    // NOTE: Unwrap() should be safe - we know it was in there from init
+                    let (_, edges) = self.nodes.get_mut(&dependent).unwrap();
+                    *edges -= 1;
+                    if *edges == 0 {
+                        self.no_edges.push(dependent);
+                    }
+                }
+
+                // Should be safe: We ensure every node is always added first thing in the loop in 'new'
+                let pair = unsafe { self.node_depends.remove_entry(&*node as &T).unwrap() };
+                Some(Ok(pair))
+            }
+            None if self.nodes.is_empty() => None,
+            None => {
+                self.nodes.clear();
+                Some(Err(CycleError))
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.nodes.len();
+        (len, Some(len))
     }
 }
 
@@ -284,7 +420,7 @@ where
                     }
                 }
 
-                // Safe?
+                // Safe: We ensure every node is always added first thing in the loop in 'new'
                 Some(Ok((node, &self.node_depends[node])))
             }
             None if self.nodes.is_empty() => None,
@@ -424,6 +560,27 @@ mod tests {
             // Must check for cycle errors before usage
             match node {
                 Ok((node, _)) => nodes.push(*node),
+                Err(_) => panic!("Unexpected cycle!"),
+            }
+        }
+
+        assert_eq!(vec!["A", "B", "C", "E", "D"], nodes);
+    }
+
+    #[test]
+    fn test_consuming_iter() {
+        let mut topo_sort = TopoSort::with_capacity(5);
+        topo_sort.insert("C", vec!["A", "B"]);
+        topo_sort.insert("E", vec!["B", "C"]);
+        topo_sort.insert("A", vec![]);
+        topo_sort.insert("D", vec!["A", "C", "E"]);
+        topo_sort.insert("B", vec!["A"]);
+
+        let mut nodes = Vec::with_capacity(5);
+        for node in topo_sort {
+            // Must check for cycle errors before usage
+            match node {
+                Ok((node, _)) => nodes.push(node),
                 Err(_) => panic!("Unexpected cycle!"),
             }
         }
