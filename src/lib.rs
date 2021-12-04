@@ -3,13 +3,13 @@
 //! A "cycle-safe" topological sort for a set of nodes with dependencies in Rust.
 //! Basically, it allows sorting a list by its dependencies while checking for
 //! cycles in the graph. If a cycle is detected, a `CycleError` is returned from the
-//! iterator.
+//! iterator (or `SortResults::Partial` is returned if using the `to/into_vec` APIs).
 //!
-//! ## Usage
+//! ## Examples
 //!
 //! ```toml
 //! [dependencies]
-//! topo_sort = "0.1"
+//! topo_sort = "0.2"
 //! ```
 //!
 //! A basic example:
@@ -22,12 +22,12 @@
 //! topo_sort.insert("E", vec!["B", "C"]);
 //! topo_sort.insert("A", vec![]);
 //! topo_sort.insert("D", vec!["A", "C", "E"]);
-//! topo_sort.insert("B", vec!["A"]);
+//! topo_sort.insert("B", vec!["A"]);//!
 //!
-//! assert_eq!(
-//!     vec!["A", "B", "C", "E", "D"],
-//!     topo_sort.try_owned_vec().unwrap()
-//! );
+//! match topo_sort.into_vec() {
+//!     SortResults::Full(nodes) => assert_eq!(vec!["A", "B", "C", "E", "D"], nodes),
+//!     SortResults::Partial(_) => panic!("unexpected cycle!"),
+//! }
 //! ```
 //!
 //! ...or using iteration:
@@ -53,6 +53,50 @@
 //!
 //! assert_eq!(vec!["A", "B", "C", "E", "D"], nodes);
 //! ```
+//!
+//! Cycle detected:
+//!
+//! ```rust
+//! use topo_sort::TopoSort;
+//!
+//! let mut topo_sort = TopoSort::with_capacity(3);
+//! topo_sort.insert(1, vec![2, 3]);
+//! topo_sort.insert(2, vec![3]);
+//! assert_eq!(vec![2,1], topo_sort.try_owned_vec().unwrap());  
+//!   
+//! topo_sort.insert(3, vec![1]); // cycle
+//! assert!(topo_sort.try_vec().is_err());
+//! ```
+//!
+//! ## Usage
+//!
+//! Using `TopoSort` is a basic two step process:
+//!
+//! 1. Add in your nodes and dependencies to `TopoSort`
+//! 2. Iterate over the results *OR* store them directly in a `Vec`
+//!
+//! * For step 2, there are three general ways to consume:
+//!     * Iteration - returns a `Result` so cycles can be detected every iteration
+//!     * `to/into_vec` functions - returns a `SortResults` enum with a `Vec` of
+//!       full (no cycle) or partial (cycle) results
+//!     * `try_[init]_vec` functions - returns a `Vec` wrapped in a `Result` (full
+//!       or no results)
+//!
+//! NOTE: The actual sorting is lazy and is only performed in step 2
+//!
+//! ## Safety
+//!
+//! The crate uses two tiny `unsafe` blocks which use the addresses of `HashMap`
+//! keys in a new `HashMap`. This was necessary to avoid cloning inserted data on
+//! owned iteration by self referencing the struct. Since there is no removal in
+//! regular iteration (`iter()` or `for` loop using `&`), this should be safe as
+//! there is no chance of the data moving during borrowed iteration. During
+//! owned/consuming iteration (`into_iter()` or `for` without `&`), we remove the
+//! entries as we go. If Rust's `HashMap` were to change and shrink during removals,
+//! this iterator could break. If this makes you uncomfortable, simply don't use
+//! consuming iteration (avoid APIs using `self` - use only those with `&self`
+//! or `&mut self`). .
+//!
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
@@ -72,6 +116,26 @@ impl fmt::Display for CycleError {
 }
 
 impl error::Error for CycleError {}
+
+// *** SortResult ***
+
+/// Results of the sort - either full or partial results (if a cycle is detected)
+pub enum SortResults<T> {
+    /// Full results - sort was successful and no cycle was found - full results enclosed
+    Full(Vec<T>),
+    /// Partial results - sort found a cycle, the results up until the cycle was discovered are enclosed
+    Partial(Vec<T>),
+}
+
+impl<T> SortResults<T> {
+    fn new(nodes: Vec<T>, node_depends_len: usize) -> SortResults<T> {
+        if node_depends_len == nodes.len() {
+            SortResults::Full(nodes)
+        } else {
+            SortResults::Partial(nodes)
+        }
+    }
+}
 
 // *** TopoSort ***
 
@@ -137,6 +201,12 @@ where
         TopoSortNodeIter::new(&self.node_depends)
     }
 
+    /// Start the sort process and return a consuming iterator of the results
+    #[inline]
+    pub fn into_nodes(self) -> IntoTopoSortNodeIter<T> {
+        IntoTopoSortNodeIter::new(self.node_depends)
+    }
+
     /// Start the sort process and return an iterator of the results and a set of its dependents
     #[inline]
     pub fn iter(&self) -> TopoSortIter<'_, T> {
@@ -144,10 +214,50 @@ where
     }
 
     /// Sort and return a vector (with borrowed nodes) of the results. If a cycle is detected,
+    /// partial results will be inside the `Partial` variant, otherwise full results will be in the
+    /// `Full` variant.
+    pub fn to_vec(&self) -> SortResults<&T> {
+        SortResults::new(self.nodes().flatten().collect(), self.node_depends.len())
+    }
+
+    /// Sort and return a vector (with owned/consumed nodes) of the results. If a cycle is detected,
+    /// partial results will be inside the `Partial` variant, otherwise full results will be in the
+    /// `Full` variant.
+    pub fn into_vec(self) -> SortResults<T> {
+        let len = self.node_depends.len();
+        let nodes: Vec<_> = self.into_nodes().flatten().collect();
+        SortResults::new(nodes, len)
+    }
+
+    /// Sort and return a vector (with owned/cloned nodes) of the results. If a cycle is detected,
+    /// partial results will be inside the `Partial` variant, otherwise full results will be in the
+    /// `Full` variant.
+    pub fn to_owned_vec(&self) -> SortResults<T>
+    where
+        T: Clone,
+    {
+        match self.to_vec() {
+            SortResults::Full(nodes) => {
+                SortResults::Full(nodes.iter().map(|&node| node.clone()).collect())
+            }
+            SortResults::Partial(nodes) => {
+                SortResults::Partial(nodes.iter().map(|&node| node.clone()).collect())
+            }
+        }
+    }
+
+    /// Sort and return a vector (with borrowed nodes) of the results. If a cycle is detected,
     /// an error is returned instead
     #[inline]
     pub fn try_vec(&self) -> Result<Vec<&T>, CycleError> {
         self.nodes().collect()
+    }
+
+    /// Sort and return a vector (with owned/consumed nodes) of the results. If a cycle is detected,
+    /// an error is returned instead
+    #[inline]
+    pub fn try_into_vec(self) -> Result<Vec<T>, CycleError> {
+        self.into_nodes().collect()
     }
 
     /// Sort and return a vector (with owned/cloned nodes) of the results. If a cycle is detected,
@@ -319,6 +429,7 @@ where
         }
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let len = self.nodes.len();
         (len, Some(len))
@@ -339,6 +450,7 @@ impl<T> IntoTopoSortIter<T>
 where
     T: Eq + Hash,
 {
+    #[inline]
     fn new(node_depends: HashMap<T, HashSet<T>>) -> Self {
         IntoTopoSortIter {
             inner: InnerIter::new(&node_depends),
@@ -365,8 +477,41 @@ where
         })
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
+    }
+}
+
+// *** IntoTopoSortNodeIter ***
+
+/// Consuming/owning Iterator over the final node only of the topological sort
+pub struct IntoTopoSortNodeIter<T>(IntoTopoSortIter<T>);
+
+impl<'d, T> IntoTopoSortNodeIter<T>
+where
+    T: Eq + Hash,
+{
+    #[inline]
+    fn new(node_depends: HashMap<T, HashSet<T>>) -> Self {
+        IntoTopoSortNodeIter(IntoTopoSortIter::new(node_depends))
+    }
+}
+
+impl<T> Iterator for IntoTopoSortNodeIter<T>
+where
+    T: Eq + Hash,
+{
+    type Item = Result<T, CycleError>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|result| result.map(|(node, _)| node))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
@@ -384,6 +529,7 @@ impl<'d, T> TopoSortIter<'d, T>
 where
     T: Eq + Hash,
 {
+    #[inline]
     fn new(node_depends: &'d HashMap<T, HashSet<T>>) -> Self {
         TopoSortIter {
             inner: InnerIter::new(node_depends),
@@ -407,6 +553,7 @@ where
         })
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
     }
@@ -450,7 +597,7 @@ where
 mod tests {
     use std::collections::HashSet;
 
-    use crate::{CycleError, TopoSort};
+    use crate::{CycleError, SortResults, TopoSort};
 
     #[test]
     fn test_termination() {
@@ -470,7 +617,11 @@ mod tests {
         topo_sort.insert(1, vec![2]);
         topo_sort.insert(2, vec![1]); // cycle
 
-        assert!(topo_sort.try_vec().is_err())
+        assert!(topo_sort.try_vec().is_err());
+
+        if let SortResults::Full(_) = topo_sort.to_owned_vec() {
+            panic!("Cycle should have been detected")
+        }
     }
 
     #[test]
@@ -480,11 +631,15 @@ mod tests {
         topo_sort.insert(2, vec![3]);
         topo_sort.insert(3, vec![1]); // cycle
 
-        assert!(topo_sort.try_vec().is_err())
+        assert!(topo_sort.try_vec().is_err());
+
+        if let SortResults::Full(_) = topo_sort.to_owned_vec() {
+            panic!("Cycle should have been detected")
+        }
     }
 
     #[test]
-    fn test_good() {
+    fn test_typical() {
         let mut topo_sort = TopoSort::with_capacity(5);
         topo_sort.insert("C", vec!["A", "B"]);
         topo_sort.insert("E", vec!["B", "C"]);
@@ -492,14 +647,20 @@ mod tests {
         topo_sort.insert("D", vec!["A", "C", "E"]);
         topo_sort.insert("B", vec!["A"]);
 
-        assert_eq!(
-            vec!["A", "B", "C", "E", "D"],
-            topo_sort.try_owned_vec().unwrap()
-        );
+        match topo_sort.into_vec() {
+            SortResults::Full(nodes) => assert_eq!(vec!["A", "B", "C", "E", "D"], nodes),
+            SortResults::Partial(_) => panic!("unexpected cycle!"),
+        }
     }
 
     #[test]
-    fn test_good_with_no_depends() {
+    fn test_empty() {
+        let topo_sort: TopoSort<u32> = TopoSort::new();
+        assert_eq!(Vec::new() as Vec<u32>, topo_sort.try_owned_vec().unwrap());
+    }
+
+    #[test]
+    fn test_with_no_depends() {
         let mut topo_sort = TopoSort::with_capacity(1);
         topo_sort.insert("C", vec![]);
 
@@ -507,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    fn test_good_with_excess_depends() {
+    fn test_with_excess_depends() {
         let mut topo_sort = TopoSort::with_capacity(5);
         topo_sort.insert("C", vec!["F", "A", "B", "F"]); // There is no 'F' - two of them
         topo_sort.insert("E", vec!["C", "B", "C"]); // Double "C" dependency
@@ -522,7 +683,7 @@ mod tests {
     }
 
     #[test]
-    fn test_loop() {
+    fn test_iter() {
         let mut topo_sort = TopoSort::with_capacity(5);
         topo_sort.insert("C", vec!["A", "B"]);
         topo_sort.insert("E", vec!["B", "C"]);

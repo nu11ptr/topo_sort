@@ -6,9 +6,10 @@
 A "cycle-safe" topological sort for a set of nodes with dependencies in Rust.
 Basically, it allows sorting a list by its dependencies while checking for
 cycles in the graph. If a cycle is detected, a `CycleError` is returned from the
-iterator.
+iterator (or `SortResults::Partial` is returned if using the `to/into_vec` APIs)
+.
 
-## Usage
+## Examples
 
 ```toml
 [dependencies]
@@ -28,10 +29,10 @@ fn main() {
     topo_sort.insert("D", vec!["A", "C", "E"]);
     topo_sort.insert("B", vec!["A"]);
 
-    assert_eq!(
-        vec!["A", "B", "C", "E", "D"],
-        topo_sort.try_owned_vec().unwrap()
-    );
+    match topo_sort.into_vec() {
+        SortResults::Full(nodes) => assert_eq!(vec!["A", "B", "C", "E", "D"], nodes),
+        SortResults::Partial(_) => panic!("unexpected cycle!"),
+    }
 }
 ```
 
@@ -70,11 +71,28 @@ fn main() {
     let mut topo_sort = TopoSort::with_capacity(3);
     topo_sort.insert(1, vec![2, 3]);
     topo_sort.insert(2, vec![3]);
-    topo_sort.insert(3, vec![1]); // cycle
+    assert_eq!(vec![2, 1], topo_sort.try_owned_vec().unwrap());
 
+    topo_sort.insert(3, vec![1]); // cycle
     assert!(topo_sort.try_vec().is_err());
 }
 ```
+
+## Usage
+
+Using `TopoSort` is a basic two step process:
+
+1. Add in your nodes and dependencies to `TopoSort`
+2. Iterate over the results *OR* store them directly in a `Vec`
+
+* For step 2, there are three general ways to consume:
+    * Iteration - returns a `Result` so cycles can be detected every iteration
+    * `to/into_vec` functions - returns a `SortResults` enum with a `Vec` of
+      full (no cycle) or partial (cycle) results
+    * `try_[init]_vec` functions - returns a `Vec` wrapped in a `Result` (full
+      or no results)
+
+NOTE: The actual sorting is lazy and is only performed in step 2
 
 ## Algorithm
 
@@ -82,13 +100,21 @@ This is implemented
 using [Kahn's algorithm](https://en.wikipedia.org/wiki/Topological_sorting).
 While basic caution was taken not to do anything too egregious performance-wise,
 the author's use cases are not performance sensitive, and it has not been
-optimized in any way.
+optimized. Still, the author tried to make reasonable trade offs and make it
+flexible for a variety of use cases, not just the author's.
 
-## Maintenance
+## Safety
 
-The crate currently meets the needs of the author and probably will not see
-significant new features. It will, however, continue to be updated if required
-for future compatibility/etc.
+The crate uses two tiny `unsafe` blocks which use the addresses of `HashMap`
+keys in a new `HashMap`. This was necessary to avoid cloning inserted data on
+owned iteration by self referencing the struct. Since there is no removal in
+regular iteration (`iter()` or `for` loop using `&`), this should be safe as
+there is no chance of the data moving during borrowed iteration. During
+owned/consuming iteration (`into_iter()` or `for` without `&`), we remove the
+entries as we go. If Rust's `HashMap` were to change and shrink during removals,
+this iterator could break. If this makes you uncomfortable, simply don't use
+consuming iteration (avoid APIs using `self` - use only those with `&self`
+or `&mut self`). .
 
 ## License
 
