@@ -218,29 +218,32 @@ where
     }
 }
 
-// *** IntoTopoSortIter ***
+// *** InnerIter ***
 
+// Dependency -> (Dependents, Edge Count)
 type Nodes<T> = HashMap<*const T, (HashSet<*const T>, u32)>;
 
-/// Consuming iterator over the final node and dependent set of the topological sort
-pub struct IntoTopoSortIter<T> {
-    // Dependent -> Dependencies
-    node_depends: HashMap<T, HashSet<T>>,
-    // Dependency -> (Dependents, Edge Count)
+struct InnerIter<T> {
     nodes: Nodes<T>,
     no_edges: Vec<*const T>,
 }
 
-impl<T> IntoTopoSortIter<T>
+impl<T> InnerIter<T>
 where
     T: Eq + Hash,
 {
+    fn new(node_depends: &HashMap<T, HashSet<T>>) -> Self {
+        let nodes = Self::make_nodes(node_depends);
+        let no_edges = Self::make_no_edges(&nodes);
+        InnerIter { nodes, no_edges }
+    }
+
     fn make_nodes(node_depends: &HashMap<T, HashSet<T>>) -> Nodes<T> {
         // Avoids borrow issues in closure
         let len = node_depends.len();
-        // Assume every dependency has every node as a dependent - likely wasteful, but avoids excess allocations
         let mut nodes: Nodes<T> = HashMap::with_capacity(len);
-        let new_entry_fn = || (HashSet::with_capacity(len), 0);
+        // Assume no dependents for now (TODO: How to pick a good # here to minimize reallocation but doesn't go crazy?)
+        let new_entry_fn = || (HashSet::new(), 0);
 
         // We need to ensure that every `*const T` is based off `&T` from the key in `node_depends`
         // NOTE: This looks odd but remember that `Eq` and `Hash` are off the value of `T`, not it's address
@@ -273,28 +276,73 @@ where
         nodes
     }
 
-    fn make_no_edges(nodes_depends: &HashMap<T, HashSet<T>>, nodes: &Nodes<T>) -> Vec<*const T> {
-        // Assume no_edge might hold every single node - wasteful, but avoids excess allocations
-        let mut no_edges = Vec::with_capacity(nodes_depends.len());
-
-        // Do initial seed of sorted with any nodes that currently have zero edges
-        for (&node, (_, edges)) in nodes {
-            if *edges == 0 {
-                no_edges.push(node);
-            }
-        }
-
-        no_edges
+    fn make_no_edges(nodes: &Nodes<T>) -> Vec<*const T> {
+        // Find first batch of ready nodes (TODO: move into loop so we can set capacity? What capacity to set?)
+        nodes
+            .iter()
+            .filter(|(_, (_, edges))| *edges == 0)
+            .map(|(&node, _)| node)
+            .collect()
     }
 
-    fn new(node_depends: HashMap<T, HashSet<T>>) -> Self {
-        let nodes = Self::make_nodes(&node_depends);
-        let no_edges = Self::make_no_edges(&node_depends, &nodes);
+    fn next(&mut self) -> Option<Result<*const T, CycleError>> {
+        match self.no_edges.pop() {
+            Some(node) => {
+                // NOTE: Unwrap() should be safe - we know it was in there since it came from there
+                // We are done with this node - remove entirely
+                let (dependents, _) = &self
+                    .nodes
+                    .remove(&node)
+                    .expect("node not in `nodes` on remove");
 
+                // Decrement the edge count of all nodes that depend on this one and add them
+                // to no_edges when they hit zero
+                for &dependent in dependents {
+                    // NOTE: Unwrap() should be safe - we know it was in there from init
+                    let (_, edges) = self
+                        .nodes
+                        .get_mut(&dependent)
+                        .expect("dependent not found in `nodes`");
+                    *edges -= 1;
+                    if *edges == 0 {
+                        self.no_edges.push(dependent);
+                    }
+                }
+
+                Some(Ok(node))
+            }
+            None if self.nodes.is_empty() => None,
+            None => {
+                self.nodes.clear();
+                Some(Err(CycleError))
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.nodes.len();
+        (len, Some(len))
+    }
+}
+
+// *** IntoTopoSortIter ***
+
+/// Consuming/owning iterator over the final node and dependent set of the topological sort
+pub struct IntoTopoSortIter<T> {
+    inner: InnerIter<T>,
+
+    // Dependent -> Dependencies
+    node_depends: HashMap<T, HashSet<T>>,
+}
+
+impl<T> IntoTopoSortIter<T>
+where
+    T: Eq + Hash,
+{
+    fn new(node_depends: HashMap<T, HashSet<T>>) -> Self {
         IntoTopoSortIter {
+            inner: InnerIter::new(&node_depends),
             node_depends,
-            nodes,
-            no_edges,
         }
     }
 }
@@ -306,38 +354,19 @@ where
     type Item = Result<(T, HashSet<T>), CycleError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.no_edges.pop() {
-            Some(node) => {
-                // NOTE: Unwrap() should be safe - we know it was in there since it came from there
-                // We are done with this node - remove entirely
-                let (dependents, _) = &self.nodes.remove(&node).unwrap();
-
-                // Decrement the edge count of all nodes that depend on this one and add them
-                // to no_edges when they hit zero
-                for &dependent in dependents {
-                    // NOTE: Unwrap() should be safe - we know it was in there from init
-                    let (_, edges) = self.nodes.get_mut(&dependent).unwrap();
-                    *edges -= 1;
-                    if *edges == 0 {
-                        self.no_edges.push(dependent);
-                    }
-                }
-
-                // Should be safe: We ensure every node is always added first thing in the loop in 'new'
-                let pair = unsafe { self.node_depends.remove_entry(&*node as &T).unwrap() };
-                Some(Ok(pair))
-            }
-            None if self.nodes.is_empty() => None,
-            None => {
-                self.nodes.clear();
-                Some(Err(CycleError))
-            }
-        }
+        self.inner.next().map(|result| {
+            result.map(|node| unsafe {
+                // NOTE: This depends on the HashMap NOT shrinking on remove - if this ever changes this
+                // will likely break as the addresses of the keys will change
+                self.node_depends
+                    .remove_entry(&*node)
+                    .expect("node not in `node_depends` on remove")
+            })
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.nodes.len();
-        (len, Some(len))
+        self.inner.size_hint()
     }
 }
 
@@ -345,11 +374,10 @@ where
 
 /// Iterator over the final node and dependent set of the topological sort
 pub struct TopoSortIter<'d, T> {
+    inner: InnerIter<T>,
+
     // Dependent -> Dependencies
     node_depends: &'d HashMap<T, HashSet<T>>,
-    // Dependency -> (Dependents, Edge Count)
-    nodes: HashMap<&'d T, (HashSet<&'d T>, u32)>,
-    no_edges: Vec<&'d T>,
 }
 
 impl<'d, T> TopoSortIter<'d, T>
@@ -357,41 +385,9 @@ where
     T: Eq + Hash,
 {
     fn new(node_depends: &'d HashMap<T, HashSet<T>>) -> Self {
-        // Avoids borrow issues in closure
-        let len = node_depends.len();
-        // Assume every dependency has every node as a dependent - likely wasteful, but avoids excess allocations
-        let mut nodes = HashMap::with_capacity(len);
-        let new_entry_fn = || (HashSet::with_capacity(len), 0);
-
-        for (dependent, dependencies) in node_depends {
-            // Don't overwrite if we have it already (from a dependency), but otherwise ensure every node is added
-            nodes.entry(dependent).or_insert_with(new_entry_fn);
-
-            for dependency in dependencies {
-                // Filter processing of nodes that are only dependencies or self dependencies - add others as edges
-                if dependent != dependency && node_depends.contains_key(dependency) {
-                    // Each dependent tracks the # of dependencies (Safe: we just inserted if it was missing above)
-                    let dependent_entry = nodes.get_mut(dependent).unwrap();
-                    dependent_entry.1 += 1;
-
-                    // Each dependency tracks all it's dependents
-                    let dependency_entry = nodes.entry(dependency).or_insert_with(new_entry_fn);
-                    dependency_entry.0.insert(dependent);
-                }
-            }
-        }
-
-        // Find first batch of ready nodes (TODO: move into loop so we can set capacity?)
-        let no_edges: Vec<_> = nodes
-            .iter()
-            .filter(|(_, (_, edges))| *edges == 0)
-            .map(|(&node, _)| node)
-            .collect();
-
         TopoSortIter {
+            inner: InnerIter::new(node_depends),
             node_depends,
-            nodes,
-            no_edges,
         }
     }
 }
@@ -403,37 +399,16 @@ where
     type Item = Result<(&'d T, &'d HashSet<T>), CycleError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.no_edges.pop() {
-            Some(node) => {
-                // NOTE: Unwrap() should be safe - we know it was in there from init
-                // We are done with this node - remove entirely
-                let (dependents, _) = &self.nodes.remove(node).unwrap();
-
-                // Decrement the edge count of all nodes that depend on this one and add them
-                // to no_edges when they hit zero
-                for &dependent in dependents {
-                    // NOTE: Unwrap() should be safe - we know it was in there from init
-                    let (_, edges) = self.nodes.get_mut(dependent).unwrap();
-                    *edges -= 1;
-                    if *edges == 0 {
-                        self.no_edges.push(dependent);
-                    }
-                }
-
+        self.inner.next().map(|result| {
+            result.map(|node| {
                 // Safe: We ensure every node is always added first thing in the loop in 'new'
-                Some(Ok((node, &self.node_depends[node])))
-            }
-            None if self.nodes.is_empty() => None,
-            None => {
-                self.nodes.clear();
-                Some(Err(CycleError))
-            }
-        }
+                unsafe { (&*node, &self.node_depends[&*node]) }
+            })
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.nodes.len();
-        (len, Some(len))
+        self.inner.size_hint()
     }
 }
 
