@@ -131,6 +131,9 @@ entries as we go. If Rust's `HashMap` were to change and shrink during removals,
 this iterator could break. If this makes you uncomfortable, simply don't use
 consuming iteration.
 
+It has been tested with [Miri](https://github.com/rust-lang/miri/) and passes
+all tests. (`MIRIFLAGS=-Zmiri-tag-raw-pointers cargo miri test`)
+
 ## License
 
 This project is licensed optionally under either:
