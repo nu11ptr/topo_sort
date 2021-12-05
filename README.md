@@ -81,7 +81,7 @@ fn main() {
     assert_eq!(vec![2, 1], topo_sort.try_owned_vec().unwrap());
 
     topo_sort.insert(3, vec![1]); // cycle
-    assert!(topo_sort.to_vec().is_err());
+    assert!(topo_sort.try_vec().is_err());
 }
 ```
 
