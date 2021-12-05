@@ -19,7 +19,7 @@ topo_sort = "0.2"
 A basic example:
 
 ```rust
-use topo_sort::TopoSort;
+use topo_sort::{SortResults, TopoSort};
 
 fn main() {
     let mut topo_sort = TopoSort::with_capacity(5);

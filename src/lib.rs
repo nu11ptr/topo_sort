@@ -15,14 +15,14 @@
 //! A basic example:
 //!
 //! ```rust
-//! use topo_sort::TopoSort;
+//! use topo_sort::{SortResults, TopoSort};
 //!
 //! let mut topo_sort = TopoSort::with_capacity(5);
 //! topo_sort.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
 //! topo_sort.insert("E", vec!["B", "C"]);
 //! topo_sort.insert("A", vec![]);
 //! topo_sort.insert("D", vec!["A", "C", "E"]);
-//! topo_sort.insert("B", vec!["A"]);//!
+//! topo_sort.insert("B", vec!["A"]);
 //!
 //! match topo_sort.into_vec() {
 //!     SortResults::Full(nodes) => assert_eq!(vec!["A", "B", "C", "E", "D"], nodes),
@@ -179,8 +179,7 @@ where
     where
         T: Clone,
     {
-        self.node_depends
-            .insert(node, HashSet::from_iter(slice.to_vec()));
+        self.insert_from_set(node, HashSet::from_iter(slice.to_vec()));
     }
 
     /// Insert into this struct with the given node and a set of its dependencies
@@ -192,7 +191,7 @@ where
     /// Insert into this struct with the given node and an iterator of its dependencies
     #[inline]
     pub fn insert<I: IntoIterator<Item = T>>(&mut self, node: T, i: I) {
-        self.node_depends.insert(node, i.into_iter().collect());
+        self.insert_from_set(node, i.into_iter().collect());
     }
 
     /// Start the sort process and return an iterator of the results
@@ -349,9 +348,7 @@ where
     }
 
     fn make_nodes(node_depends: &HashMap<T, HashSet<T>>) -> Nodes<T> {
-        // Avoids borrow issues in closure
-        let len = node_depends.len();
-        let mut nodes: Nodes<T> = HashMap::with_capacity(len);
+        let mut nodes: Nodes<T> = HashMap::with_capacity(node_depends.len());
         // Assume no dependents for now (TODO: How to pick a good # here to minimize reallocation but doesn't go crazy?)
         let new_entry_fn = || (HashSet::new(), 0);
 
@@ -371,8 +368,10 @@ where
                     // `dependency` must be in `node_depends` to qualify for continued processing
                     if let Some(&dependency) = lookup.get(dependency) {
                         // Each dependent tracks the # of dependencies
-                        // NOTE: The `or_insert_with` will never be executed, but I just liked it better than casting to `*const T` with `get_mut`
-                        let dependent_entry = nodes.entry(dependent).or_insert_with(new_entry_fn);
+                        // Safe: It was just added above
+                        let dependent_entry = nodes
+                            .get_mut(&(dependent as *const T))
+                            .expect("dependent not found in `nodes`");
                         dependent_entry.1 += 1;
 
                         // Each dependency tracks all it's dependents
