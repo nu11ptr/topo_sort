@@ -9,6 +9,12 @@ cycles in the graph. If a cycle is detected, a `CycleError` is returned from the
 iterator (or `SortResults::Partial` is returned if using the `to/into_vec` APIs)
 .
 
+Topological sorts are used to sort the nodes of a unidirectional graph. Typical
+applications would include anything that requires dependency based sorting. For
+example, it could be used to find the correct order of compilation dependencies,
+or it could be used to find module cycles in languages that don't allow cycles.
+The applications are limitless.
+
 ## Examples
 
 ```toml
@@ -23,7 +29,8 @@ use topo_sort::{SortResults, TopoSort};
 
 fn main() {
     let mut topo_sort = TopoSort::with_capacity(5);
-    topo_sort.insert("C", vec!["A", "B"]); // read: "C" depends on "A" and "B"
+    // read as "C" depends on "A" and "B"
+    topo_sort.insert("C", vec!["A", "B"]);
     topo_sort.insert("E", vec!["B", "C"]);
     topo_sort.insert("A", vec![]);
     topo_sort.insert("D", vec!["A", "C", "E"]);
@@ -62,7 +69,7 @@ fn main() {
 }
 ```
 
-Cycle detected:
+Cycle detection:
 
 ```rust
 use topo_sort::TopoSort;
@@ -74,9 +81,20 @@ fn main() {
     assert_eq!(vec![2, 1], topo_sort.try_owned_vec().unwrap());
 
     topo_sort.insert(3, vec![1]); // cycle
-    assert!(topo_sort.try_vec().is_err());
+    assert!(topo_sort.to_vec().is_err());
 }
 ```
+
+## Features
+
+* Cycle detection - impossible to get data without handling cycle error
+    * Choose methods for retrieving "all or nothing" or partial data
+* Inserted nodes are never copied/cloned (unless explicitly requested
+  via `owned` methods)
+* Only requires `Eq` and `Hash` implemented on nodes
+    * There are a few optional `owned` methods that require `Clone`
+* Choice of iteration or converting into `Vec`
+* Lazy sorting - sorting is initiated on iteration only
 
 ## Usage
 
@@ -88,11 +106,9 @@ Using `TopoSort` is a basic two step process:
 * For step 2, there are three general ways to consume:
     * Iteration - returns a `Result` so cycles can be detected every iteration
     * `to/into_vec` functions - returns a `SortResults` enum with a `Vec` of
-      full (no cycle) or partial (cycle) results
-    * `try_[init]_vec` functions - returns a `Vec` wrapped in a `Result` (full
+      full (no cycle) or partial results (when cycle detected)
+    * `try_[into]_vec` functions - returns a `Vec` wrapped in a `Result` (full
       or no results)
-
-NOTE: The actual sorting is lazy and is only performed in step 2
 
 ## Algorithm
 
@@ -113,8 +129,7 @@ there is no chance of the data moving during borrowed iteration. During
 owned/consuming iteration (`into_iter()` or `for` without `&`), we remove the
 entries as we go. If Rust's `HashMap` were to change and shrink during removals,
 this iterator could break. If this makes you uncomfortable, simply don't use
-consuming iteration (avoid APIs using `self` - use only those with `&self`
-or `&mut self`). .
+consuming iteration.
 
 ## License
 
