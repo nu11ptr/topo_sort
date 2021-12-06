@@ -451,6 +451,9 @@ where
     }
 }
 
+// This should be safe
+unsafe impl<T> Send for InnerIter<T> {}
+
 // *** IntoTopoSortIter ***
 
 /// Consuming/owning iterator over the final node and dependent set of the topological sort

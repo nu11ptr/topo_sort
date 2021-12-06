@@ -93,6 +93,7 @@ fn main() {
   via `owned` methods)
 * Only requires `Eq` and `Hash` implemented on nodes
     * There are a few optional `owned` methods that require `Clone`
+* Dependency free - only uses `std`
 * Choice of iteration or converting into `Vec`
 * Lazy sorting - sorting is initiated on iteration only
 
