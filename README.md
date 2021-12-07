@@ -19,7 +19,7 @@ The applications are limitless.
 
 ```toml
 [dependencies]
-topo_sort = "0.2"
+topo_sort = "0.3"
 ```
 
 A basic example:

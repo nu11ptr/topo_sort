@@ -1,6 +1,6 @@
 [package]
 name = "topo_sort"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Scott Meeuwsen <smeeuwsen@gmail.com>"]
 license = "MIT OR Apache-2.0"
 description = "A 'cycle-safe' topological sort for a set of nodes with dependencies"
@@ -10,3 +10,6 @@ keywords = ["topological", "sort", "sorting", "dependencies", "dependency"]
 categories = ["algorithms", "data-structures"]
 readme = "README.md"
 edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }

@@ -9,7 +9,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! topo_sort = "0.2"
+//! topo_sort = "0.3"
 //! ```
 //!
 //! A basic example:
@@ -100,6 +100,9 @@ use std::hash::Hash;
 use std::ops::Index;
 use std::{error, fmt};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 // *** Error ***
 
 /// An error type returned by the iterator when a cycle is detected in the dependency graph
@@ -117,6 +120,7 @@ impl error::Error for CycleError {}
 // *** SortResult ***
 
 /// Results of the sort - either full or partial results (if a cycle is detected)
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub enum SortResults<U> {
     /// Full results - sort was successful and no cycle was found - full results enclosed
     Full(Vec<U>),
@@ -147,7 +151,11 @@ impl<U> SortResults<U> {
 
 /// TopoSort is used as a collection to map nodes to their dependencies. The actual sort is "lazy" and is performed during iteration.
 #[derive(Clone, Default)]
-pub struct TopoSort<T> {
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct TopoSort<T>
+where
+    T: Eq + Hash,
+{
     // Dependent -> Dependencies
     node_depends: HashMap<T, HashSet<T>>,
 }
