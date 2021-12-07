@@ -36,7 +36,7 @@ fn main() {
     topo_sort.insert("D", vec!["A", "C", "E"]);
     topo_sort.insert("B", vec!["A"]);
 
-    match topo_sort.into_vec() {
+    match topo_sort.into_vec_nodes() {
         SortResults::Full(nodes) => assert_eq!(vec!["A", "B", "C", "E", "D"], nodes),
         SortResults::Partial(_) => panic!("unexpected cycle!"),
     }
@@ -78,10 +78,10 @@ fn main() {
     let mut topo_sort = TopoSort::with_capacity(3);
     topo_sort.insert(1, vec![2, 3]);
     topo_sort.insert(2, vec![3]);
-    assert_eq!(vec![2, 1], topo_sort.try_owned_vec().unwrap());
+    assert_eq!(vec![2, 1], topo_sort.try_owned_vec_nodes().unwrap());
 
     topo_sort.insert(3, vec![1]); // cycle
-    assert!(topo_sort.try_vec().is_err());
+    assert!(topo_sort.try_vec_nodes().is_err());
 }
 ```
 

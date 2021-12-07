@@ -25,7 +25,7 @@
 //! topo_sort.insert("D", vec!["A", "C", "E"]);
 //! topo_sort.insert("B", vec!["A"]);
 //!
-//! match topo_sort.into_vec() {
+//! match topo_sort.into_vec_nodes() {
 //!     SortResults::Full(nodes) => assert_eq!(vec!["A", "B", "C", "E", "D"], nodes),
 //!     SortResults::Partial(_) => panic!("unexpected cycle!"),
 //! }
@@ -63,10 +63,10 @@
 //! let mut topo_sort = TopoSort::with_capacity(3);
 //! topo_sort.insert(1, vec![2, 3]);
 //! topo_sort.insert(2, vec![3]);
-//! assert_eq!(vec![2,1], topo_sort.try_owned_vec().unwrap());  
+//! assert_eq!(vec![2,1], topo_sort.try_owned_vec_nodes().unwrap());  
 //!   
 //! topo_sort.insert(3, vec![1]); // cycle
-//! assert!(topo_sort.try_vec().is_err());
+//! assert!(topo_sort.try_vec_nodes().is_err());
 //! ```
 //!
 //! ## Usage
@@ -117,15 +117,15 @@ impl error::Error for CycleError {}
 // *** SortResult ***
 
 /// Results of the sort - either full or partial results (if a cycle is detected)
-pub enum SortResults<T> {
+pub enum SortResults<U> {
     /// Full results - sort was successful and no cycle was found - full results enclosed
-    Full(Vec<T>),
+    Full(Vec<U>),
     /// Partial results - sort found a cycle, the results up until the cycle was discovered are enclosed
-    Partial(Vec<T>),
+    Partial(Vec<U>),
 }
 
-impl<T> SortResults<T> {
-    fn new(nodes: Vec<T>, node_depends_len: usize) -> SortResults<T> {
+impl<U> SortResults<U> {
+    fn new(nodes: Vec<U>, node_depends_len: usize) -> SortResults<U> {
         if node_depends_len == nodes.len() {
             SortResults::Full(nodes)
         } else {
@@ -156,6 +156,8 @@ impl<T> TopoSort<T>
 where
     T: Eq + Hash,
 {
+    // # Creation #
+
     /// Initialize a new struct with zero capacity. It will not allocate until the first insertion
     #[inline]
     pub fn new() -> Self {
@@ -180,6 +182,8 @@ where
         }
     }
 
+    // # Insertion #
+
     /// Insert into this struct with the given node and a slice of its dependencies
     pub fn insert_from_slice(&mut self, node: T, slice: &[T])
     where
@@ -200,6 +204,8 @@ where
         self.insert_from_set(node, i.into_iter().collect());
     }
 
+    // # Iterators #
+
     /// Start the sort process and return an iterator of the results
     #[inline]
     pub fn nodes(&self) -> TopoSortNodeIter<'_, T> {
@@ -218,22 +224,58 @@ where
         TopoSortIter::new(&self.node_depends)
     }
 
+    // # Cycles #
+
     /// Sort and return true if a cycle was detected or false if it wasn't
     pub fn cycle_detected(&self) -> bool {
         self.iter().any(|result| result.is_err())
     }
 
+    // # to Vec #
+
+    /// Sort and return a vector (with borrowed nodes/dependencies) of the results. If a cycle is detected,
+    /// partial results will be inside the `Partial` variant, otherwise full results will be in the
+    /// `Full` variant.
+    pub fn to_vec(&self) -> SortResults<(&T, &HashSet<T>)> {
+        SortResults::new(self.iter().flatten().collect(), self.node_depends.len())
+    }
+
+    /// Sort and return a vector (with owned/consumed nodes/dependencies) of the results. If a cycle is detected,
+    /// partial results will be inside the `Partial` variant, otherwise full results will be in the
+    /// `Full` variant.
+    pub fn into_vec(self) -> SortResults<(T, HashSet<T>)> {
+        let len = self.node_depends.len();
+        let nodes: Vec<_> = self.into_iter().flatten().collect();
+        SortResults::new(nodes, len)
+    }
+
+    /// Sort and return a vector (with owned/cloned nodes/dependencies) of the results. If a cycle is detected,
+    /// partial results will be inside the `Partial` variant, otherwise full results will be in the
+    /// `Full` variant.
+    pub fn to_owned_vec(&self) -> SortResults<(T, HashSet<T>)>
+    where
+        T: Clone,
+    {
+        SortResults::new(
+            self.iter()
+                .flatten()
+                .map(|(node, depends)| (node.clone(), depends.clone()))
+                .collect(),
+            self.node_depends.len(),
+        )
+    }
+
     /// Sort and return a vector (with borrowed nodes) of the results. If a cycle is detected,
     /// partial results will be inside the `Partial` variant, otherwise full results will be in the
     /// `Full` variant.
-    pub fn to_vec(&self) -> SortResults<&T> {
+    pub fn to_vec_nodes(&self) -> SortResults<&T> {
         SortResults::new(self.nodes().flatten().collect(), self.node_depends.len())
     }
 
     /// Sort and return a vector (with owned/consumed nodes) of the results. If a cycle is detected,
     /// partial results will be inside the `Partial` variant, otherwise full results will be in the
     /// `Full` variant.
-    pub fn into_vec(self) -> SortResults<T> {
+    pub fn into_vec_nodes(self) -> SortResults<T> {
         let len = self.node_depends.len();
         let nodes: Vec<_> = self.into_nodes().flatten().collect();
         SortResults::new(nodes, len)
@@ -242,37 +284,60 @@ where
     /// Sort and return a vector (with owned/cloned nodes) of the results. If a cycle is detected,
     /// partial results will be inside the `Partial` variant, otherwise full results will be in the
     /// `Full` variant.
-    pub fn to_owned_vec(&self) -> SortResults<T>
+    pub fn to_owned_vec_nodes(&self) -> SortResults<T>
     where
         T: Clone,
     {
-        match self.to_vec() {
-            SortResults::Full(nodes) => {
-                SortResults::Full(nodes.iter().map(|&node| node.clone()).collect())
-            }
-            SortResults::Partial(nodes) => {
-                SortResults::Partial(nodes.iter().map(|&node| node.clone()).collect())
-            }
-        }
+        SortResults::new(
+            self.nodes().flatten().map(|node| node.clone()).collect(),
+            self.node_depends.len(),
+        )
+    }
+
+    // # try Vec #
+
+    /// Sort and return a vector (with borrowed nodes/dependencies) of the results. If a cycle is detected,
+    /// an error is returned instead
+    #[inline]
+    pub fn try_vec(&self) -> Result<Vec<(&T, &HashSet<T>)>, CycleError> {
+        self.iter().collect()
+    }
+
+    /// Sort and return a vector (with owned/consumed nodes/dependencies) of the results. If a cycle is detected,
+    /// an error is returned instead
+    #[inline]
+    pub fn try_into_vec(self) -> Result<Vec<(T, HashSet<T>)>, CycleError> {
+        self.into_iter().collect()
+    }
+
+    /// Sort and return a vector (with owned/cloned nodes/dependencies) of the results. If a cycle is detected,
+    /// an error is returned instead
+    pub fn try_owned_vec(&self) -> Result<Vec<(T, HashSet<T>)>, CycleError>
+    where
+        T: Clone,
+    {
+        self.iter()
+            .map(|result| result.map(|(node, depends)| (node.clone(), depends.clone())))
+            .collect()
     }
 
     /// Sort and return a vector (with borrowed nodes) of the results. If a cycle is detected,
     /// an error is returned instead
     #[inline]
-    pub fn try_vec(&self) -> Result<Vec<&T>, CycleError> {
+    pub fn try_vec_nodes(&self) -> Result<Vec<&T>, CycleError> {
         self.nodes().collect()
     }
 
     /// Sort and return a vector (with owned/consumed nodes) of the results. If a cycle is detected,
     /// an error is returned instead
     #[inline]
-    pub fn try_into_vec(self) -> Result<Vec<T>, CycleError> {
+    pub fn try_into_vec_nodes(self) -> Result<Vec<T>, CycleError> {
         self.into_nodes().collect()
     }
 
     /// Sort and return a vector (with owned/cloned nodes) of the results. If a cycle is detected,
     /// an error is returned instead
-    pub fn try_owned_vec(&self) -> Result<Vec<T>, CycleError>
+    pub fn try_owned_vec_nodes(&self) -> Result<Vec<T>, CycleError>
     where
         T: Clone,
     {
@@ -280,6 +345,8 @@ where
             .map(|result| result.map(|node| node.clone()))
             .collect()
     }
+
+    // # Misc #
 
     /// Reclaim ownership of unsorted data that was previously inserted into TopoSort
     pub fn into_inner(self) -> HashMap<T, HashSet<T>> {
@@ -634,13 +701,13 @@ mod tests {
         let mut topo_sort = TopoSort::with_capacity(2);
         topo_sort.insert(1, vec![2]);
         assert!(!topo_sort.cycle_detected());
-        assert!(!topo_sort.to_owned_vec().cycle_detected());
-        assert!(!topo_sort.try_vec().is_err());
+        assert!(!topo_sort.to_owned_vec_nodes().cycle_detected());
+        assert!(!topo_sort.try_vec_nodes().is_err());
 
         topo_sort.insert(2, vec![1]); // cycle
         assert!(topo_sort.cycle_detected());
-        assert!(topo_sort.to_owned_vec().cycle_detected());
-        assert!(topo_sort.try_into_vec().is_err());
+        assert!(topo_sort.to_owned_vec_nodes().cycle_detected());
+        assert!(topo_sort.try_into_vec_nodes().is_err());
     }
 
     #[test]
@@ -649,13 +716,13 @@ mod tests {
         topo_sort.insert(1, vec![2, 3]);
         topo_sort.insert(2, vec![3]);
         assert!(!topo_sort.cycle_detected());
-        assert!(!topo_sort.to_owned_vec().cycle_detected());
-        assert!(!topo_sort.try_vec().is_err());
+        assert!(!topo_sort.to_owned_vec_nodes().cycle_detected());
+        assert!(!topo_sort.try_vec_nodes().is_err());
 
         topo_sort.insert(3, vec![1]); // cycle
         assert!(topo_sort.cycle_detected());
-        assert!(topo_sort.to_owned_vec().cycle_detected());
-        assert!(topo_sort.try_into_vec().is_err());
+        assert!(topo_sort.to_owned_vec_nodes().cycle_detected());
+        assert!(topo_sort.try_into_vec_nodes().is_err());
     }
 
     #[test]
@@ -667,7 +734,7 @@ mod tests {
         topo_sort.insert("D", vec!["A", "C", "E"]);
         topo_sort.insert("B", vec!["A"]);
 
-        match topo_sort.into_vec() {
+        match topo_sort.into_vec_nodes() {
             SortResults::Full(nodes) => assert_eq!(vec!["A", "B", "C", "E", "D"], nodes),
             SortResults::Partial(_) => panic!("unexpected cycle!"),
         }
@@ -676,7 +743,10 @@ mod tests {
     #[test]
     fn test_empty() {
         let topo_sort: TopoSort<u32> = TopoSort::new();
-        assert_eq!(Vec::new() as Vec<u32>, topo_sort.try_owned_vec().unwrap());
+        assert_eq!(
+            Vec::new() as Vec<(u32, HashSet<u32>)>,
+            topo_sort.try_owned_vec().unwrap()
+        );
     }
 
     #[test]
@@ -684,7 +754,7 @@ mod tests {
         let mut topo_sort = TopoSort::with_capacity(1);
         topo_sort.insert("C", vec![]);
 
-        assert_eq!(vec!["C"], topo_sort.try_owned_vec().unwrap());
+        assert_eq!(vec!["C"], topo_sort.try_owned_vec_nodes().unwrap());
     }
 
     #[test]
@@ -698,7 +768,7 @@ mod tests {
 
         assert_eq!(
             vec!["A", "B", "C", "E", "D"],
-            topo_sort.try_owned_vec().unwrap()
+            topo_sort.try_owned_vec_nodes().unwrap()
         );
     }
 
