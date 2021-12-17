@@ -1,6 +1,6 @@
 [package]
 name = "topo_sort"
-version = "0.3.1"
+version = "0.4.0"
 authors = ["Scott Meeuwsen <smeeuwsen@gmail.com>"]
 license = "MIT OR Apache-2.0"
 description = "A 'cycle-safe' topological sort for a set of nodes with dependencies"
@@ -11,5 +11,9 @@ categories = ["algorithms", "data-structures"]
 readme = "README.md"
 edition = "2021"
 
+[features]
+indexmap-serde = ["indexmap/serde-1", "serde"]
+
 [dependencies]
+indexmap = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }

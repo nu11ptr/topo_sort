@@ -9,7 +9,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! topo_sort = "0.3"
+//! topo_sort = "0.4"
 //! ```
 //!
 //! A basic example:
@@ -95,13 +95,28 @@
 //! consuming iteration.
 //!
 
-use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::ops::Index;
 use std::{error, fmt};
 
+#[cfg(not(any(feature = "indexmap", feature = "indexmap-serde")))]
+use std::collections::{HashMap, HashSet};
+
+#[cfg(any(feature = "indexmap", feature = "indexmap-serde"))]
+use indexmap::{IndexMap, IndexSet};
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+#[cfg(not(any(feature = "indexmap", feature = "indexmap-serde")))]
+type Map<K, V> = HashMap<K, V>;
+#[cfg(not(any(feature = "indexmap", feature = "indexmap-serde")))]
+type Set<T> = HashSet<T>;
+
+#[cfg(any(feature = "indexmap", feature = "indexmap-serde"))]
+type Map<K, V> = IndexMap<K, V>;
+#[cfg(any(feature = "indexmap", feature = "indexmap-serde"))]
+type Set<T> = IndexSet<T>;
 
 // *** Error ***
 
@@ -157,7 +172,7 @@ where
     T: Eq + Hash,
 {
     // Dependent -> Dependencies
-    node_depends: HashMap<T, HashSet<T>>,
+    node_depends: Map<T, Set<T>>,
 }
 
 impl<T> TopoSort<T>
@@ -170,13 +185,13 @@ where
     #[inline]
     pub fn new() -> Self {
         TopoSort {
-            node_depends: HashMap::new(),
+            node_depends: Map::new(),
         }
     }
 
     /// Initialize a new struct from a map. The key represents the node to be sorted and the set is its dependencies
     #[inline]
-    pub fn from_map(nodes: HashMap<T, HashSet<T>>) -> Self {
+    pub fn from_map(nodes: Map<T, Set<T>>) -> Self {
         TopoSort {
             node_depends: nodes,
         }
@@ -186,7 +201,7 @@ where
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         TopoSort {
-            node_depends: HashMap::with_capacity(capacity),
+            node_depends: Map::with_capacity(capacity),
         }
     }
 
@@ -197,12 +212,12 @@ where
     where
         T: Clone,
     {
-        self.insert_from_set(node, HashSet::from_iter(slice.to_vec()));
+        self.insert_from_set(node, Set::from_iter(slice.to_vec()));
     }
 
     /// Insert into this struct with the given node and a set of its dependencies
     #[inline]
-    pub fn insert_from_set(&mut self, node: T, depends: HashSet<T>) {
+    pub fn insert_from_set(&mut self, node: T, depends: Set<T>) {
         self.node_depends.insert(node, depends);
     }
 
@@ -244,14 +259,14 @@ where
     /// Sort and return a vector (with borrowed nodes/dependencies) of the results. If a cycle is detected,
     /// partial results will be inside the `Partial` variant, otherwise full results will be in the
     /// `Full` variant.
-    pub fn to_vec(&self) -> SortResults<(&T, &HashSet<T>)> {
+    pub fn to_vec(&self) -> SortResults<(&T, &Set<T>)> {
         SortResults::new(self.iter().flatten().collect(), self.node_depends.len())
     }
 
     /// Sort and return a vector (with owned/consumed nodes/dependencies) of the results. If a cycle is detected,
     /// partial results will be inside the `Partial` variant, otherwise full results will be in the
     /// `Full` variant.
-    pub fn into_vec(self) -> SortResults<(T, HashSet<T>)> {
+    pub fn into_vec(self) -> SortResults<(T, Set<T>)> {
         let len = self.node_depends.len();
         let nodes: Vec<_> = self.into_iter().flatten().collect();
         SortResults::new(nodes, len)
@@ -260,7 +275,7 @@ where
     /// Sort and return a vector (with owned/cloned nodes/dependencies) of the results. If a cycle is detected,
     /// partial results will be inside the `Partial` variant, otherwise full results will be in the
     /// `Full` variant.
-    pub fn to_owned_vec(&self) -> SortResults<(T, HashSet<T>)>
+    pub fn to_owned_vec(&self) -> SortResults<(T, Set<T>)>
     where
         T: Clone,
     {
@@ -307,20 +322,20 @@ where
     /// Sort and return a vector (with borrowed nodes/dependencies) of the results. If a cycle is detected,
     /// an error is returned instead
     #[inline]
-    pub fn try_vec(&self) -> Result<Vec<(&T, &HashSet<T>)>, CycleError> {
+    pub fn try_vec(&self) -> Result<Vec<(&T, &Set<T>)>, CycleError> {
         self.iter().collect()
     }
 
     /// Sort and return a vector (with owned/consumed nodes/dependencies) of the results. If a cycle is detected,
     /// an error is returned instead
     #[inline]
-    pub fn try_into_vec(self) -> Result<Vec<(T, HashSet<T>)>, CycleError> {
+    pub fn try_into_vec(self) -> Result<Vec<(T, Set<T>)>, CycleError> {
         self.into_iter().collect()
     }
 
     /// Sort and return a vector (with owned/cloned nodes/dependencies) of the results. If a cycle is detected,
     /// an error is returned instead
-    pub fn try_owned_vec(&self) -> Result<Vec<(T, HashSet<T>)>, CycleError>
+    pub fn try_owned_vec(&self) -> Result<Vec<(T, Set<T>)>, CycleError>
     where
         T: Clone,
     {
@@ -357,7 +372,7 @@ where
     // # Misc #
 
     /// Reclaim ownership of unsorted data that was previously inserted into TopoSort
-    pub fn into_inner(self) -> HashMap<T, HashSet<T>> {
+    pub fn into_inner(self) -> Map<T, Set<T>> {
         self.node_depends
     }
 
@@ -375,7 +390,7 @@ where
 
     /// Returns the dependency set of a node (as inserted), if found, else None
     #[inline]
-    pub fn get(&self, node: &T) -> Option<&HashSet<T>> {
+    pub fn get(&self, node: &T) -> Option<&Set<T>> {
         self.node_depends.get(node)
     }
 }
@@ -384,7 +399,7 @@ impl<T> Index<&T> for TopoSort<T>
 where
     T: Eq + Hash,
 {
-    type Output = HashSet<T>;
+    type Output = Set<T>;
 
     #[inline]
     fn index(&self, index: &T) -> &Self::Output {
@@ -396,7 +411,7 @@ impl<T> IntoIterator for TopoSort<T>
 where
     T: Eq + Hash,
 {
-    type Item = Result<(T, HashSet<T>), CycleError>;
+    type Item = Result<(T, Set<T>), CycleError>;
     type IntoIter = IntoTopoSortIter<T>;
 
     #[inline]
@@ -409,7 +424,7 @@ impl<'d, T> IntoIterator for &'d TopoSort<T>
 where
     T: Eq + Hash,
 {
-    type Item = Result<(&'d T, &'d HashSet<T>), CycleError>;
+    type Item = Result<(&'d T, &'d Set<T>), CycleError>;
     type IntoIter = TopoSortIter<'d, T>;
 
     #[inline]
@@ -421,7 +436,7 @@ where
 // *** InnerIter ***
 
 // Dependency -> (Dependents, Edge Count)
-type Nodes<T> = HashMap<*const T, (HashSet<*const T>, u32)>;
+type Nodes<T> = Map<*const T, (Set<*const T>, u32)>;
 
 struct InnerIter<T> {
     nodes: Nodes<T>,
@@ -432,21 +447,21 @@ impl<T> InnerIter<T>
 where
     T: Eq + Hash,
 {
-    fn new(node_depends: &HashMap<T, HashSet<T>>) -> Self {
+    fn new(node_depends: &Map<T, Set<T>>) -> Self {
         let nodes = Self::make_nodes(node_depends);
         let no_edges = Self::make_no_edges(&nodes);
         InnerIter { nodes, no_edges }
     }
 
-    fn make_nodes(node_depends: &HashMap<T, HashSet<T>>) -> Nodes<T> {
-        let mut nodes: Nodes<T> = HashMap::with_capacity(node_depends.len());
+    fn make_nodes(node_depends: &Map<T, Set<T>>) -> Nodes<T> {
+        let mut nodes: Nodes<T> = Map::with_capacity(node_depends.len());
         // Assume no dependents for now (TODO: How to pick a good # here to minimize reallocation but doesn't go crazy?)
-        let new_entry_fn = || (HashSet::new(), 0);
+        let new_entry_fn = || (Set::new(), 0);
 
         // We need to ensure that every `*const T` is based off `&T` from the key in `node_depends`
         // NOTE: This looks odd but remember that `Eq` and `Hash` are off the value of `T`, not it's address
         // so we need to lookup the address even though it looks like an identity op... it isn't
-        let lookup: HashMap<_, _> = node_depends.keys().map(|key| (key, key)).collect();
+        let lookup: Map<_, _> = node_depends.keys().map(|key| (key, key)).collect();
 
         for (dependent, dependencies) in node_depends {
             // Don't overwrite if we have it already (from a dependency below), but otherwise ensure every node is added
@@ -536,7 +551,7 @@ pub struct IntoTopoSortIter<T> {
     inner: InnerIter<T>,
 
     // Dependent -> Dependencies
-    node_depends: HashMap<T, HashSet<T>>,
+    node_depends: Map<T, Set<T>>,
 }
 
 impl<T> IntoTopoSortIter<T>
@@ -544,7 +559,7 @@ where
     T: Eq + Hash,
 {
     #[inline]
-    fn new(node_depends: HashMap<T, HashSet<T>>) -> Self {
+    fn new(node_depends: Map<T, Set<T>>) -> Self {
         IntoTopoSortIter {
             inner: InnerIter::new(&node_depends),
             node_depends,
@@ -556,7 +571,7 @@ impl<T> Iterator for IntoTopoSortIter<T>
 where
     T: Eq + Hash,
 {
-    type Item = Result<(T, HashSet<T>), CycleError>;
+    type Item = Result<(T, Set<T>), CycleError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|result| {
@@ -586,7 +601,7 @@ where
     T: Eq + Hash,
 {
     #[inline]
-    fn new(node_depends: HashMap<T, HashSet<T>>) -> Self {
+    fn new(node_depends: Map<T, Set<T>>) -> Self {
         IntoTopoSortNodeIter(IntoTopoSortIter::new(node_depends))
     }
 }
@@ -615,7 +630,7 @@ pub struct TopoSortIter<'d, T> {
     inner: InnerIter<T>,
 
     // Dependent -> Dependencies
-    node_depends: &'d HashMap<T, HashSet<T>>,
+    node_depends: &'d Map<T, Set<T>>,
 }
 
 impl<'d, T> TopoSortIter<'d, T>
@@ -623,7 +638,7 @@ where
     T: Eq + Hash,
 {
     #[inline]
-    fn new(node_depends: &'d HashMap<T, HashSet<T>>) -> Self {
+    fn new(node_depends: &'d Map<T, Set<T>>) -> Self {
         TopoSortIter {
             inner: InnerIter::new(node_depends),
             node_depends,
@@ -635,7 +650,7 @@ impl<'d, T> Iterator for TopoSortIter<'d, T>
 where
     T: Eq + Hash,
 {
-    type Item = Result<(&'d T, &'d HashSet<T>), CycleError>;
+    type Item = Result<(&'d T, &'d Set<T>), CycleError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|result| {
@@ -662,7 +677,7 @@ where
     T: Eq + Hash,
 {
     #[inline]
-    fn new(node_depends: &'d HashMap<T, HashSet<T>>) -> Self {
+    fn new(node_depends: &'d Map<T, Set<T>>) -> Self {
         TopoSortNodeIter(TopoSortIter::new(node_depends))
     }
 }
@@ -688,9 +703,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
-
-    use crate::{CycleError, SortResults, TopoSort};
+    use crate::{CycleError, Map, Set, SortResults, TopoSort};
 
     #[test]
     fn test_termination() {
@@ -752,7 +765,7 @@ mod tests {
     fn test_empty() {
         let topo_sort: TopoSort<u32> = TopoSort::new();
         assert_eq!(
-            Vec::new() as Vec<(u32, HashSet<u32>)>,
+            Vec::new() as Vec<(u32, Set<u32>)>,
             topo_sort.try_owned_vec().unwrap()
         );
     }
@@ -799,11 +812,11 @@ mod tests {
 
         assert_eq!(
             vec![
-                (&"A", &HashSet::new()),
-                (&"B", &HashSet::from_iter(vec!["A"])),
-                (&"C", &HashSet::from_iter(vec!["A", "B"])),
-                (&"E", &HashSet::from_iter(vec!["B", "C"])),
-                (&"D", &HashSet::from_iter(vec!["A", "C", "E"])),
+                (&"A", &Set::new()),
+                (&"B", &Set::from_iter(vec!["A"])),
+                (&"C", &Set::from_iter(vec!["A", "B"])),
+                (&"E", &Set::from_iter(vec!["B", "C"])),
+                (&"D", &Set::from_iter(vec!["A", "C", "E"])),
             ],
             nodes
         );
@@ -828,11 +841,11 @@ mod tests {
 
         assert_eq!(
             vec![
-                ("A", HashSet::new()),
-                ("B", HashSet::from_iter(vec!["A"])),
-                ("C", HashSet::from_iter(vec!["A", "B"])),
-                ("E", HashSet::from_iter(vec!["B", "C"])),
-                ("D", HashSet::from_iter(vec!["A", "C", "E"])),
+                ("A", Set::new()),
+                ("B", Set::from_iter(vec!["A"])),
+                ("C", Set::from_iter(vec!["A", "B"])),
+                ("E", Set::from_iter(vec!["B", "C"])),
+                ("D", Set::from_iter(vec!["A", "C", "E"])),
             ],
             nodes
         );
@@ -846,7 +859,7 @@ mod tests {
         topo_sort.insert_from_slice("A", &["B"]);
         assert_eq!(1, topo_sort.len());
 
-        let set = HashSet::from_iter(vec!["B", "D"]);
+        let set = Set::from_iter(vec!["B", "D"]);
         topo_sort.insert_from_set("C", set.clone());
 
         assert_eq!(set, *topo_sort.get(&"C").unwrap());
@@ -854,8 +867,8 @@ mod tests {
 
         assert_eq!(None, topo_sort.get(&"D"));
 
-        let mut map = HashMap::with_capacity(2);
-        map.insert("A", HashSet::from_iter(vec!["B"]));
+        let mut map = Map::with_capacity(2);
+        map.insert("A", Set::from_iter(vec!["B"]));
         map.insert("C", set.clone());
         assert_eq!(map, topo_sort.into_inner())
     }
